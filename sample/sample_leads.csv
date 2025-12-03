@@ -1,0 +1,22 @@
+name,email,phone_number,address
+John Doe, john.doe@example.com,416-555-0123,123 Main St Toronto ON M5V 3A1
+Jane Smith, jane.smith@gmail.com,647-555-0456,456 Oak Ave Vancouver BC V6B 1A2
+John Doe, john.doe@example.com,416-555-0123,123 Main St Toronto ON M5V 3A1
+Bob Wilson, bob.wilson@outlook.com,,789 Pine Rd Calgary AB T2P 2M6
+Alice Johnson, alice.johnson@yahoo.com,403-555-0789,
+,555-1234,321 Elm St Montreal QC H1A 1A1
+Carol Davis, carol.davis@example.com,514-555-5678,654 Maple Dr Montreal QC H2X 1Y7
+Dave Miller, dave.miller@gmail.com,204-555-9012,wrong_address_format
+Dave Miller, dave.miller@gmail.com,204-555-9012,wrong_address_format
+bro, invalid-email@,613-555-3456,987 Birch Ln Ottawa ON K1A 0B1
+Emily Brown, emily.brown@test.com,,111 Cedar St Winnipeg MB R3C 1A1
+Frank Jones, frank.jones@domain.com,905-555-6789,222 Spruce Ave Hamilton ON L8R 1A1
+Emily Brown, emily.brown@test.com,416-555-7890,111 Cedar St Winnipeg MB R3C 1A1
+grace Lee, grace.lee@example.com,778-555-0123,333 Willow Rd Burnaby BC V5C 1A1
+Henry Chen, henry.chen@gmail.com,250-555-4567,
+,403-555-8901,
+Iris Patel, iris.patel@yahoo.com,506-555-2345,444 Ash St Saint John NB E2L 1A1
+Jack Taylor, jack.taylor@outlook.com,403-555-6789,555 Oak Dr Red Deer AB T4N 1A1
+Henry Chen, henry.chen@gmail.com,250-555-4567,666 Pine Ln Victoria BC V8V 1A1
+Kate Martin, kate.martin@example.com,,777 Elm Ave Saskatoon SK S7K 1A1
+Lian Anderson, liam.anderson@gmail.com,867-555-0123,888 Birch St Yellowknife NT X1A 1A1
