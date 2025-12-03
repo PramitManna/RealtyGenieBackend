@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: realtygenie-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    branch: main
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE  
+        value: "1"
+      # Add your environment variables from .env file as secrets in Render dashboard
+      # - key: SUPABASE_URL
+      #   sync: false
+      # - key: SUPABASE_KEY
+      #   sync: false
+      # - key: PROJECT_ID
+      #   sync: false
+      # - key: LOCATION
+      #   sync: false
+      # - key: MAILGUN_API_KEY
+      #   sync: false
+      # - key: MAILGUN_DOMAIN
+      #   sync: false

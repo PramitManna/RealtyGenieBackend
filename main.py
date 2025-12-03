@@ -8,6 +8,15 @@ import os
 # Load environment variables FIRST
 load_dotenv()
 
+# Set Google Application Credentials if not already set
+if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+    creds_path = os.path.join(os.path.dirname(__file__), "creds", "realtygenie-55126509a168.json")
+    if os.path.exists(creds_path):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+        logging.info(f"✅ Set Google credentials: {creds_path}")
+    else:
+        logging.warning("⚠️ Google credentials file not found - some features may not work")
+
 # Verify Supabase credentials are loaded
 if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_KEY"):
     raise ValueError("❌ SUPABASE_URL and SUPABASE_KEY must be set in .env file")
@@ -49,4 +58,5 @@ app.include_router(lead_nurture_router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)

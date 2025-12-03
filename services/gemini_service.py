@@ -36,14 +36,45 @@ class GeminiService:
     """
     
     def __init__(self):
-        """Initialize Vertex AI and Vision API."""
+        """Initialize service without connecting to Google APIs yet."""
+        self.model = None
+        self.vision_client = None
+        self._initialized = False
+        
+    def _ensure_initialized(self):
+        """Ensure the service is initialized with Google APIs."""
+        if self._initialized:
+            return
+            
         try:
+            # Handle Google credentials - prioritize environment variable for production
+            if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                # Try environment variable with JSON content (Render deployment)
+                google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+                if google_creds_json:
+                    import tempfile
+                    import json
+                    # Create temporary file with credentials
+                    temp_creds = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json')
+                    temp_creds.write(google_creds_json)
+                    temp_creds.close()
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds.name
+                    logger.info("✅ Set Google credentials from environment variable")
+                else:
+                    # Fallback to local file for development
+                    creds_path = os.path.join(os.path.dirname(__file__), "..", "creds", "realtygenie-55126509a168.json")
+                    if os.path.exists(creds_path):
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                        logger.info(f"✅ Set Google credentials from file: {creds_path}")
+                    else:
+                        logger.warning("⚠️ Google credentials not found - some features may not work")
+            
             # Initialize Vertex AI
             project_id = os.getenv("PROJECT_ID")
             location = os.getenv("LOCATION")
             
             if not project_id:
-                raise ValueError("❌ GCP_PROJECT_ID not found")
+                raise ValueError("❌ PROJECT_ID not found")
             
             vertexai.init(project=project_id, location=location)
             
@@ -53,6 +84,7 @@ class GeminiService:
             # Initialize Vision API client
             self.vision_client = vision.ImageAnnotatorClient()
             
+            self._initialized = True
             logger.info("✅ Vertex AI Gemini and Vision API initialized successfully")
             
         except Exception as e:
@@ -74,6 +106,7 @@ class GeminiService:
         Returns:
             Dictionary with 'subject', 'body' keys and 'metadata' with token usage
         """
+        self._ensure_initialized()
         prompt = self._build_single_email_prompt(category_prompt, campaign_context)
         
         try:
@@ -254,6 +287,7 @@ Generate the premium HTML email now:"""
             DataFrame with columns: name, email, phone, city, address
         """
         try:
+            self._ensure_initialized()
             # Step 1: Extract text using Vision API
             img = vision.Image(content=image_bytes)
             response = self.vision_client.text_detection(image=img)
@@ -317,6 +351,116 @@ Return ONLY the JSON array, no other text or markdown.
         except Exception as e:
             logger.error(f"Error processing image: {e}")
             raise
+
+    async def generate_triggered_email(
+        self,
+        realtor_name: str,
+        brokerage: str,
+        markets: list,
+        purpose: str,
+        tones: list,
+        short_description: str = None
+    ) -> Dict[str, str]:
+        """
+        Generate personalized email content for triggered emails
+        
+        Args:
+            realtor_name: Name of the realtor
+            brokerage: Realtor's brokerage/company
+            markets: List of markets the realtor serves
+            purpose: Purpose of the email
+            tones: List of desired tones
+            short_description: Optional additional context
+        
+        Returns:
+            Dictionary with 'subject' and 'body' keys
+        """
+        try:
+            self._ensure_initialized()
+            logger.info(f"🎯 Generating triggered email for {realtor_name} - Purpose: {purpose}")
+            
+            # Build the structured prompt
+            markets_str = ", ".join(markets) if markets else "local area"
+            tones_str = ", ".join(tones)
+            
+            prompt = f"""
+You are an expert email marketing specialist for real estate professionals. Generate a personalized email for a realtor to send to their leads.
+
+REALTOR DETAILS:
+- Name: {realtor_name}
+- Brokerage: {brokerage}
+- Markets: {markets_str}
+
+EMAIL REQUIREMENTS:
+- Purpose: {purpose}
+- Tone(s): {tones_str}
+- Additional Context: {short_description or "None provided"}
+
+CRITICAL REQUIREMENTS:
+1. Must include {{name}} placeholder in the body for personalization
+2. Subject line should be compelling and align with the purpose
+3. Email must be professional and trust-building
+4. Content should be relevant to real estate clients
+5. Maintain the selected tone(s) throughout
+6. Keep the email concise but impactful (200-400 words)
+7. Include a subtle call-to-action when appropriate
+
+FORMATTING RULES:
+- Return ONLY the JSON structure below
+- No markdown formatting, explanations, or additional text
+- Ensure the body uses proper HTML formatting with <p>, <br/>, etc.
+
+RETURN FORMAT:
+{{
+"subject": "Your compelling subject line here",
+"body": "Your email body here with {{name}} placeholder and proper HTML formatting"
+}}
+"""
+
+            # Generate content
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            logger.info(f"📧 Generated email content for purpose: {purpose}")
+            
+            # Clean and parse JSON response
+            clean_response = response_text.replace("```json", "").replace("```", "").strip()
+            
+            try:
+                email_content = json.loads(clean_response)
+                
+                # Validate required fields
+                if not email_content.get('subject') or not email_content.get('body'):
+                    raise ValueError("Missing required subject or body fields")
+                
+                # Validate that {name} placeholder exists in body
+                if '{name}' not in email_content.get('body', ''):
+                    logger.warning("Generated email missing {name} placeholder - adding it")
+                    body = email_content['body']
+                    # Add greeting with placeholder at the beginning
+                    email_content['body'] = f"<p>Dear {{name}},</p><p>{body}</p>"
+                
+                logger.info(f"✅ Successfully generated triggered email")
+                return email_content
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse email JSON: {e}")
+                logger.error(f"Raw response: {clean_response}")
+                
+                # Fallback response
+                return {
+                    "subject": f"Important Update from {realtor_name}",
+                    "body": f"<p>Dear {{name}},</p><p>I hope this message finds you well. I wanted to reach out regarding {purpose.lower()}.</p><p>As your trusted real estate professional at {brokerage}, I'm committed to keeping you informed about important developments in the {markets_str} market.</p><p>Please don't hesitate to reach out if you have any questions.</p><p>Best regards,<br/>{realtor_name}</p>"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error generating triggered email: {e}")
+            # Return fallback email
+            return {
+                "subject": f"Update from {realtor_name}",
+                "body": f"<p>Dear {{name}},</p><p>I hope you're doing well. I wanted to share some important information with you.</p><p>Thank you for your continued trust in my services.</p><p>Best regards,<br/>{realtor_name}<br/>{brokerage}</p>"
+            }
+
 
 _gemini_service_instance = None
 

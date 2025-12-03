@@ -418,7 +418,10 @@ async def add_single_lead(
     Add a single lead manually
     """
     try:
+        logger.info(f"🎯 Adding single lead - email: {email}, batch_id: {batch_id}, user_id: {user_id}")
+        
         if not is_valid_email(email):
+            logger.error(f"Invalid email format: {email}")
             raise HTTPException(status_code=400, detail=f"Invalid email: {email}")
         
         email = clean_email(email)
@@ -427,21 +430,30 @@ async def add_single_lead(
         phone = clean_phone(phone) if phone else None
         address = clean_address(address) if address else None
         
+        logger.info(f"📝 Cleaned data - email: {email}, name: {name}, phone: {phone}")
+        
         supabase = get_supabase_service()
         result = supabase.insert_single_lead(email, batch_id, user_id, name, phone, address)
         
-        logger.info(f"Added single lead {email} to batch {batch_id}")
+        logger.info(f"✅ Successfully added lead {email} to batch {batch_id}")
         return {
             "success": True,
             "message": "Lead added successfully",
             "lead": result["lead"]
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error adding single lead: {e}")
+        logger.error(f"❌ Error adding single lead - {type(e).__name__}: {str(e)}")
         if "duplicate key" in str(e).lower():
-            raise HTTPException(status_code=400, detail="Lead with this email already exists")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+            raise HTTPException(status_code=400, detail="Lead with this email already exists in this batch")
+        elif "foreign key" in str(e).lower():
+            raise HTTPException(status_code=400, detail="Invalid batch_id or user_id provided")
+        elif "permission denied" in str(e).lower() or "access denied" in str(e).lower():
+            raise HTTPException(status_code=403, detail="Access denied - check user permissions")
+        else:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.delete("/{lead_id}")

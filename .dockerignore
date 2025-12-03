@@ -18,6 +18,27 @@ lib64/
 parts/
 sdist/
 var/
+*.log
+server.log
+
+# Development files
+.env.local
+.env.development
+.pytest_cache/
+.coverage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Don't ignore credentials in Docker (they'll be mounted)
+# creds/
 wheels/
 *.egg-info/
 .installed.cfg

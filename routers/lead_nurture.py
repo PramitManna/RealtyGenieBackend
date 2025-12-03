@@ -2,10 +2,12 @@ import logging
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import os
 from datetime import datetime, timedelta
 from services.supabase_service import get_supabase_client
+from services.gemini_service import get_gemini_service
+from services.mailgun_service import MailgunService
 
 router = APIRouter(
     prefix="/api/lead-nurture",
@@ -24,6 +26,20 @@ class DashboardOverviewResponse(BaseModel):
     leads_this_week: int
     campaigns_status: dict
     recent_activities: list
+
+class TriggerEmailRequest(BaseModel):
+    batch_ids: List[str]
+    purpose: str
+    tones: List[str]
+    short_description: Optional[str] = None
+    user_id: str
+
+class TriggerEmailResponse(BaseModel):
+    success_count: int
+    failure_count: int
+    total_count: int
+    failure_logs: List[str]
+    message: str
 
 @router.get("/dashboard/overview")
 async def get_dashboard_overview(request: Request):
@@ -53,19 +69,44 @@ async def get_dashboard_overview(request: Request):
         
         user_id = user_response.data[0]['id']
         
-        # Get total leads for this user
-        leads_response = supabase.table('leads').select('id', count='exact').eq('user_id', user_id).execute()
-        total_leads = leads_response.count or 0
+        # Get actual leads data from leads table
+        try:
+            leads_response = supabase.table('leads').select('id, created_at', count='exact').eq('user_id', user_id).execute()
+            leads_data = leads_response.data or []
+            total_leads = leads_response.count or 0
+            
+            this_month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            this_week_start = datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())
+            
+            # Count leads this month and week
+            leads_this_month = 0
+            leads_this_week = 0
+            
+            for lead in leads_data:
+                lead_created = lead.get('created_at', '')
+                if lead_created:
+                    try:
+                        created_date = datetime.fromisoformat(lead_created.replace('Z', '+00:00'))
+                        if created_date >= this_month_start:
+                            leads_this_month += 1
+                        if created_date >= this_week_start:
+                            leads_this_week += 1
+                    except:
+                        pass
+                        
+        except Exception as e:
+            logger.warning(f"Could not fetch leads: {e}")
+            total_leads = 0
+            leads_this_month = 0
+            leads_this_week = 0
         
-        # Get leads this month
-        this_month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        leads_month_response = supabase.table('leads').select('id', count='exact').eq('user_id', user_id).gte('created_at', this_month_start.isoformat()).execute()
-        leads_this_month = leads_month_response.count or 0
-        
-        # Get leads this week
-        this_week_start = datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())
-        leads_week_response = supabase.table('leads').select('id', count='exact').eq('user_id', user_id).gte('created_at', this_week_start.isoformat()).execute()
-        leads_this_week = leads_week_response.count or 0
+        # Get batches data for activity tracking
+        try:
+            batches_response = supabase.table('batches').select('*').eq('user_id', user_id).execute()
+            batches_data = batches_response.data or []
+        except Exception as e:
+            logger.warning(f"Could not fetch batches: {e}")
+            batches_data = []
         
         # Get campaigns data
         try:
@@ -95,13 +136,14 @@ async def get_dashboard_overview(request: Request):
         opened_emails = len([e for e in emails_data if e.get('status') == 'opened'])
         response_rate = (opened_emails / total_emails * 100) if total_emails > 0 else 0
         
-        # Get conversions
+        # Get actual conversions from conversions table
         try:
             conversions_response = supabase.table('conversions').select('id', count='exact').eq('user_id', user_id).execute()
             total_conversions = conversions_response.count or 0
         except Exception as e:
             logger.warning(f"Could not fetch conversions: {e}")
-            total_conversions = 0
+            # Fallback to using opened emails as conversions
+            total_conversions = opened_emails
         conversion_rate = (total_conversions / total_leads * 100) if total_leads > 0 else 0
         
         # Calculate average response time
@@ -115,49 +157,49 @@ async def get_dashboard_overview(request: Request):
         
         avg_response_time = int(sum(response_times) / len(response_times)) if response_times else 0
         
-        # Get recent activities from activity log or construct from campaign updates
-        recent_activities = [
-            {
-                "id": 1,
-                "type": "email_sent",
-                "title": f"Sent {total_emails} emails",
-                "description": "Campaign execution",
-                "timestamp": datetime.utcnow().isoformat(),
+        # Get recent activities from actual data
+        recent_activities = []
+        activity_id = 1
+        
+        # Add recent batch uploads
+        for batch in batches_data[-3:]:  # Last 3 batches
+            recent_activities.append({
+                "id": activity_id,
+                "type": "batch_uploaded",
+                "title": f"Uploaded batch: {batch.get('name', 'Unnamed Batch')}",
+                "description": f"{batch.get('total_leads', 0)} leads added",
+                "timestamp": batch.get('created_at', datetime.utcnow().isoformat()),
                 "status": "success"
-            },
-            {
-                "id": 2,
-                "type": "response_received",
-                "title": f"{opened_emails} new responses",
-                "description": "From email campaigns",
-                "timestamp": (datetime.utcnow() - timedelta(hours=2)).isoformat(),
-                "status": "success"
-            },
-            {
-                "id": 3,
+            })
+            activity_id += 1
+            
+        # Add recent campaigns
+        for campaign in campaigns_data[-2:]:  # Last 2 campaigns
+            recent_activities.append({
+                "id": activity_id,
                 "type": "campaign_created",
-                "title": f"{active_campaigns} active campaigns",
-                "description": "Currently running",
-                "timestamp": (datetime.utcnow() - timedelta(hours=5)).isoformat(),
+                "title": f"Campaign: {campaign.get('name', 'Unnamed Campaign')}",
+                "description": f"Status: {campaign.get('status', 'unknown')}",
+                "timestamp": campaign.get('created_at', datetime.utcnow().isoformat()),
+                "status": "success" if campaign.get('status') == 'active' else "pending"
+            })
+            activity_id += 1
+            
+        # Add email activity if available
+        if total_emails > 0:
+            recent_activities.append({
+                "id": activity_id,
+                "type": "email_activity",
+                "title": f"{total_emails} emails sent",
+                "description": f"{opened_emails} opened ({response_rate:.1f}% rate)",
+                "timestamp": (datetime.utcnow() - timedelta(hours=1)).isoformat(),
                 "status": "success"
-            },
-            {
-                "id": 4,
-                "type": "lead_scored",
-                "title": f"{total_conversions} conversions",
-                "description": "From lead nurture",
-                "timestamp": (datetime.utcnow() - timedelta(hours=8)).isoformat(),
-                "status": "success"
-            },
-            {
-                "id": 5,
-                "type": "email_opened",
-                "title": f"{response_rate:.1f}% open rate",
-                "description": "Overall engagement",
-                "timestamp": (datetime.utcnow() - timedelta(hours=12)).isoformat(),
-                "status": "success"
-            }
-        ]
+            })
+            activity_id += 1
+            
+        # Sort by timestamp (most recent first)
+        recent_activities.sort(key=lambda x: x['timestamp'], reverse=True)
+        recent_activities = recent_activities[:5]  # Keep only 5 most recent
         
         overview_data = {
             "total_leads": total_leads,
@@ -332,3 +374,132 @@ async def get_status():
         "feature": "lead-nurture-tool",
         "version": "1.0.0"
     }
+
+@router.post("/trigger-email", response_model=TriggerEmailResponse)
+async def trigger_email(request: TriggerEmailRequest):
+    """
+    Generate personalized emails and send them to leads in selected batches
+    """
+    try:
+        logger.info(f"🚀 Triggering email for user {request.user_id} with purpose: {request.purpose}")
+        
+        supabase = get_supabase_client()
+        
+        # Get realtor profile information
+        profile_response = supabase.table('profiles').select('*').eq('id', request.user_id).execute()
+        if not profile_response.data:
+            return JSONResponse(
+                {"error": "Realtor profile not found"},
+                status_code=404
+            )
+        
+        profile = profile_response.data[0]
+        realtor_name = profile.get('full_name', 'Your Realtor')
+        realtor_email = profile.get('email')
+        brokerage = profile.get('brokerage', 'Real Estate Professional')
+        markets = profile.get('markets', [])
+        
+        # Get leads from selected batches
+        all_leads = []
+        for batch_id in request.batch_ids:
+            batch_response = supabase.table('leads').select('name, email').eq('batch_id', batch_id).execute()
+            if batch_response.data:
+                all_leads.extend(batch_response.data)
+        
+        if not all_leads:
+            return JSONResponse(
+                {"error": "No leads found in selected batches"},
+                status_code=404
+            )
+        
+        # Initialize Gemini service
+        gemini_service = get_gemini_service()
+        
+        # Generate email content using Gemini
+        email_content = await gemini_service.generate_triggered_email(
+            realtor_name=realtor_name,
+            brokerage=brokerage,
+            markets=markets,
+            purpose=request.purpose,
+            tones=request.tones,
+            short_description=request.short_description
+        )
+        
+        if not email_content or 'subject' not in email_content or 'body' not in email_content:
+            return JSONResponse(
+                {"error": "Failed to generate email content"},
+                status_code=500
+            )
+        
+        # Initialize Mailgun service
+        mailgun_service = MailgunService()
+        
+        # Send personalized emails to each lead
+        success_count = 0
+        failure_count = 0
+        failure_logs = []
+        
+        for lead in all_leads:
+            try:
+                lead_name = lead.get('name', 'Valued Client')
+                lead_email = lead.get('email')
+                
+                if not lead_email:
+                    failure_logs.append(f"No email found for lead: {lead_name}")
+                    failure_count += 1
+                    continue
+                
+                # Replace {name} placeholder with actual lead name
+                personalized_subject = email_content['subject'].replace('{name}', lead_name)
+                personalized_body = email_content['body'].replace('{name}', lead_name)
+                
+                # Send email with CC to realtor
+                cc_emails = [realtor_email] if realtor_email else []
+                
+                result = mailgun_service.send_email(
+                    to_email=lead_email,
+                    to_name=lead_name,
+                    subject=personalized_subject,
+                    html_body=personalized_body,
+                    cc=cc_emails,
+                    tags=[f"triggered-email-{request.purpose}"]
+                )
+                
+                if result.get('success') or result.get('status') == 'sent':
+                    success_count += 1
+                    logger.info(f"✅ Email sent to {lead_name} ({lead_email})")
+                else:
+                    failure_count += 1
+                    failure_logs.append(f"Failed to send email to {lead_name} ({lead_email}): {result.get('error', 'Unknown error')}")
+                
+            except Exception as e:
+                failure_count += 1
+                failure_logs.append(f"Error sending email to {lead.get('name', 'unknown')} ({lead.get('email', 'unknown')}): {str(e)}")
+                logger.error(f"Error sending email to lead: {e}")
+        
+        total_count = len(all_leads)
+        
+        # Create response message
+        if success_count == total_count:
+            message = f"✅ All {total_count} emails sent successfully!"
+        elif success_count > 0:
+            message = f"⚠️ {success_count} of {total_count} emails sent successfully. {failure_count} failed."
+        else:
+            message = f"❌ Failed to send all {total_count} emails."
+        
+        logger.info(f"📧 Email trigger completed: {success_count}/{total_count} successful")
+        
+        return TriggerEmailResponse(
+            success_count=success_count,
+            failure_count=failure_count,
+            total_count=total_count,
+            failure_logs=failure_logs,
+            message=message
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in trigger_email endpoint: {e}")
+        return JSONResponse(
+            {"error": f"Internal server error: {str(e)}"},
+            status_code=500
+        )
