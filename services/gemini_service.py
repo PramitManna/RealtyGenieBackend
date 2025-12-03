@@ -47,27 +47,46 @@ class GeminiService:
             return
             
         try:
-            # Handle Google credentials - prioritize environment variable for production
-            if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-                # Try environment variable with JSON content (Render deployment)
-                google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
-                if google_creds_json:
-                    import tempfile
-                    import json
+            logger.info("🔧 Initializing Gemini Service...")
+            logger.info(f"📍 Current working directory: {os.getcwd()}")
+            logger.info(f"🔍 Checking environment variables...")
+            logger.info(f"   - GOOGLE_CREDENTIALS_JSON: {'✅ Found' if os.getenv('GOOGLE_CREDENTIALS_JSON') else '❌ Not found'}")
+            logger.info(f"   - GOOGLE_APPLICATION_CREDENTIALS: {'✅ Found' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') else '❌ Not found'}")
+            logger.info(f"   - PROJECT_ID: {'✅ Found' if os.getenv('PROJECT_ID') else '❌ Not found'}")
+            
+            # Handle Google credentials - prioritize JSON for production, file for local
+            google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+            if google_creds_json:
+                # Production deployment with JSON credentials
+                import tempfile
+                import json
+                try:
+                    # Validate JSON format
+                    json.loads(google_creds_json)
                     # Create temporary file with credentials
                     temp_creds = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json')
                     temp_creds.write(google_creds_json)
                     temp_creds.close()
                     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds.name
-                    logger.info("✅ Set Google credentials from environment variable")
+                    logger.info("✅ Set Google credentials from GOOGLE_CREDENTIALS_JSON environment variable")
+                except json.JSONDecodeError:
+                    logger.error("❌ Invalid JSON format in GOOGLE_CREDENTIALS_JSON")
+                    raise ValueError("Invalid Google credentials JSON format")
+            elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                # Use existing file path (local development)
+                creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+                if os.path.exists(creds_path):
+                    logger.info(f"✅ Using Google credentials from file: {creds_path}")
                 else:
-                    # Fallback to local file for development
-                    creds_path = os.path.join(os.path.dirname(__file__), "..", "creds", "realtygenie-55126509a168.json")
-                    if os.path.exists(creds_path):
-                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-                        logger.info(f"✅ Set Google credentials from file: {creds_path}")
-                    else:
-                        logger.warning("⚠️ Google credentials not found - some features may not work")
+                    logger.error(f"❌ Google credentials file not found at: {creds_path}")
+            else:
+                # Fallback to local file for development
+                creds_path = os.path.join(os.path.dirname(__file__), "..", "creds", "realtygenie-55126509a168.json")
+                if os.path.exists(creds_path):
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                    logger.info(f"✅ Set Google credentials from local file: {creds_path}")
+                else:
+                    logger.warning("⚠️ Google credentials not found - some features may not work")
             
             # Initialize Vertex AI
             project_id = os.getenv("PROJECT_ID")
