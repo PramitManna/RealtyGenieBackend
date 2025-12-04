@@ -28,9 +28,9 @@ class DashboardOverviewResponse(BaseModel):
     recent_activities: list
 
 class TriggerEmailRequest(BaseModel):
-    batch_ids: List[str]
+    batch_ids: Optional[List[str]] = None  # If None, target all leads
     purpose: str
-    tones: List[str]
+    persona: str
     short_description: Optional[str] = None
     user_id: str
 
@@ -399,16 +399,25 @@ async def trigger_email(request: TriggerEmailRequest):
         brokerage = profile.get('brokerage', 'Real Estate Professional')
         markets = profile.get('markets', [])
         
-        # Get leads from selected batches
+        # Get leads - either from selected batches or all leads for the user
         all_leads = []
-        for batch_id in request.batch_ids:
-            batch_response = supabase.table('leads').select('name, email').eq('batch_id', batch_id).execute()
-            if batch_response.data:
-                all_leads.extend(batch_response.data)
+        if request.batch_ids:
+            # Get leads from specific batches
+            for batch_id in request.batch_ids:
+                batch_response = supabase.table('leads').select('name, email').eq('batch_id', batch_id).execute()
+                if batch_response.data:
+                    all_leads.extend(batch_response.data)
+            error_message = "No leads found in selected batches"
+        else:
+            # Get all leads for the user
+            leads_response = supabase.table('leads').select('name, email').eq('user_id', request.user_id).execute()
+            if leads_response.data:
+                all_leads = leads_response.data
+            error_message = "No leads found for user"
         
         if not all_leads:
             return JSONResponse(
-                {"error": "No leads found in selected batches"},
+                {"error": error_message},
                 status_code=404
             )
         
@@ -421,7 +430,7 @@ async def trigger_email(request: TriggerEmailRequest):
             brokerage=brokerage,
             markets=markets,
             purpose=request.purpose,
-            tones=request.tones,
+            persona=request.persona,
             short_description=request.short_description
         )
         

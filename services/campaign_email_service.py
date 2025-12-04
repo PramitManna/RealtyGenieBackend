@@ -97,20 +97,30 @@ class CampaignEmailService:
         agent_name: str = "Your Name",
         company_name: str = "Your Company",
         target_city: str = "your market",
-        tones: List[str] = None,
+        persona: str = "buyer",
     ) -> List[Dict]:
         """
         Generate 5 Month 1 emails using Gemini AI
-        Blends all user tones into a single cohesive email set
+        Uses automatic persona-to-tone mapping
         Returns list of draft emails (not saved to DB yet)
         """
-        logger.info(f"Generating Month 1 emails for campaign {campaign_id}")
+        logger.info(f"Generating Month 1 emails for campaign {campaign_id} with persona: {persona}")
         
-        # Use tones if provided, otherwise use single tone
-        tones_to_blend = tones if tones else "Professional"
-        tone_description = ", ".join(tones_to_blend) if len(tones_to_blend) > 1 else "Professional"
+        # Map persona to appropriate tones
+        persona_tone_mapping = {
+            "buyer": ["Consultative", "Advisor"],
+            "seller": ["Expert", "Data driven"],
+            "investor": ["Expert", "Data driven"],
+            "past_client": ["Friendly", "Warm"],
+            "referral": ["Friendly", "Warm"],
+            "cold_prospect": ["Light-hearted", "Humorous"]
+        }
         
-        logger.info(f"Blending tones: {tone_description}")
+        # Get tones based on persona
+        tones_to_blend = persona_tone_mapping.get(persona.lower(), ["Professional", "Consultative"])
+        tone_description = ", ".join(tones_to_blend)
+        
+        logger.info(f"Auto-mapped tones for {persona}: {tone_description}")
         
         generated_emails = []
         

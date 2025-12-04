@@ -22,7 +22,15 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
 
-# 5. Run the server
+# 5. Setup database (IMPORTANT!)
+# Go to Supabase Dashboard → SQL Editor
+# Run migrations in order from /migrations/ directory
+# See DEPLOYMENT.md for details
+
+# 6. Verify database setup
+python check_migrations.py
+
+# 7. Run the server
 uvicorn main:app --reload
 ```
 

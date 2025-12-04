@@ -377,7 +377,7 @@ Return ONLY the JSON array, no other text or markdown.
         brokerage: str,
         markets: list,
         purpose: str,
-        tones: list,
+        persona: str,
         short_description: str = None
     ) -> Dict[str, str]:
         """
@@ -388,7 +388,7 @@ Return ONLY the JSON array, no other text or markdown.
             brokerage: Realtor's brokerage/company
             markets: List of markets the realtor serves
             purpose: Purpose of the email
-            tones: List of desired tones
+            persona: Target persona (buyer, seller, investor, past_client, referral, cold_prospect)
             short_description: Optional additional context
         
         Returns:
@@ -396,7 +396,20 @@ Return ONLY the JSON array, no other text or markdown.
         """
         try:
             self._ensure_initialized()
-            logger.info(f"🎯 Generating triggered email for {realtor_name} - Purpose: {purpose}")
+            logger.info(f"🎯 Generating triggered email for {realtor_name} - Purpose: {purpose} - Persona: {persona}")
+            
+            # Map persona to appropriate tones
+            persona_tone_mapping = {
+                "buyer": ["Consultative", "Advisor"],
+                "seller": ["Expert", "Data driven"],
+                "investor": ["Expert", "Data driven"],
+                "past_client": ["Friendly", "Warm"],
+                "referral": ["Friendly", "Warm"],
+                "cold_prospect": ["Light-hearted", "Humorous"]
+            }
+            
+            # Get tones based on persona
+            tones = persona_tone_mapping.get(persona.lower(), ["Professional", "Consultative"])
             
             # Build the structured prompt
             markets_str = ", ".join(markets) if markets else "local area"
@@ -412,7 +425,8 @@ REALTOR DETAILS:
 
 EMAIL REQUIREMENTS:
 - Purpose: {purpose}
-- Tone(s): {tones_str}
+- Target Persona: {persona}
+- Tone(s): {tones_str} (automatically selected based on persona)
 - Additional Context: {short_description or "None provided"}
 
 CRITICAL REQUIREMENTS:

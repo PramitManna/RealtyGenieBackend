@@ -16,7 +16,7 @@ campaign_email_service = CampaignEmailService()
 class GenerateMonth1EmailsRequest(BaseModel):
     campaign_id: str
     campaign_name: str
-    tones: str
+    persona: str
     objective: str
     target_city: Optional[str] = "your market"
 
@@ -46,7 +46,7 @@ class UpdateEmailRequest(BaseModel):
 
 class RegenerateEmailRequest(BaseModel):
     campaign_name: str
-    tones: str
+    persona: str
     objective: str
     target_city: List[str]
 
@@ -61,7 +61,7 @@ async def generate_month_1_emails(request: GenerateMonth1EmailsRequest):
         emails = campaign_email_service.generate_month_1_emails(
             campaign_id=request.campaign_id,
             campaign_name=request.campaign_name,
-            tones=request.tones,
+            persona=request.persona,
             objective=request.objective,
             target_city=request.target_city,
         )
@@ -157,7 +157,7 @@ async def regenerate_email(email_id: str, request: RegenerateEmailRequest):
         result = campaign_email_service.regenerate_email(
             email_id=email_id,
             campaign_name=request.campaign_name,
-            tones=request.tones,
+            persona=request.persona,
             objective=request.objective,
             target_city=request.target_city,
         )

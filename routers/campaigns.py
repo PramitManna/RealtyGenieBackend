@@ -23,20 +23,23 @@ class CampaignCreateRequest(BaseModel):
     batch_id: str
     subject: str
     body: str
-    tones: List[str]
+    persona: str
     objective: str
+    name: Optional[str] = None
+    description: Optional[str] = None
     recipient_timezone: Optional[str] = "America/Toronto"
 
 
 class CampaignResponse(BaseModel):
     id: str
     batch_id: str
+    name: str
     subject: str
     body: str
     objective: str
-    tones: List[str]
-    recipient_timezone: str
+    persona: str
     status: str
+    total_recipients: int
     created_at: str
     queue_stats: Optional[Dict]
 
@@ -56,25 +59,46 @@ async def create_campaign(request: CampaignCreateRequest):
     try:
         supabase = get_supabase_client()
         
-        batch_response = supabase.table("batches").select("id, name").eq("id", request.batch_id).single().execute()
+        # Get batch info and user_id
+        batch_response = supabase.table("batches").select("id, name, user_id").eq("id", request.batch_id).single().execute()
         if not batch_response.data:
             raise HTTPException(status_code=404, detail="Batch not found")
+        
+        user_id = batch_response.data["user_id"]
+        batch_name = batch_response.data["name"]
         
         leads_response = supabase.table("leads").select("id").eq("batch_id", request.batch_id).eq("status", "active").execute()
         if not leads_response.data:
             raise HTTPException(status_code=400, detail="Batch has no active leads")
         
+        total_recipients = len(leads_response.data)
         campaign_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         
+        # Generate campaign name if not provided
+        campaign_name = request.name or f"Campaign for {batch_name}"
+        campaign_description = request.description or f"Email campaign targeting {request.persona} persona"
+        
         campaign_data = {
             "id": campaign_id,
+            "user_id": user_id,
             "batch_id": request.batch_id,
+            "name": campaign_name,
+            "description": campaign_description,
             "subject": request.subject,
             "body": request.body,
-            "tones": request.tones,
+            "email_template": request.body,  # Use body as template
+            "persona": request.persona,
             "objective": request.objective,
             "status": "active",
+            "total_recipients": total_recipients,
+            "emails_sent": 0,
+            "open_rate": 0,
+            "click_rate": 0,
+            "response_rate": 0,
+            "target_segments": [],
+            "exclude_segments": [],
+            "start_date": now,
             "created_at": now,
             "updated_at": now,
         }
@@ -95,11 +119,13 @@ async def create_campaign(request: CampaignCreateRequest):
         return CampaignResponse(
             id=campaign_id,
             batch_id=request.batch_id,
+            name=campaign_name,
             subject=request.subject,
             body=request.body,
-            tones=request.tones,
+            persona=request.persona,
             objective=request.objective,
             status="active",
+            total_recipients=total_recipients,
             created_at=now,
             queue_stats=queue_stats,
         )
@@ -334,13 +360,16 @@ async def get_campaign_send_schedule(campaign_id: str, lead_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch send schedule: {str(e)}")
 
 
-class GenerateDraftsRequest(BaseModel):
+class DraftGenerationRequest(BaseModel):
     campaign_id: str
     campaign_name: str
     target_city: List[str]
-    tones: List[str]  # All tones to blend
+    persona: str
     objective: str
     user_id: str
+    
+    class Config:
+        extra = "forbid"
 
 
 class EmailDraft(BaseModel):
@@ -361,7 +390,7 @@ class GenerateDraftsResponse(BaseModel):
 
 
 @router.post("/generate-drafts", response_model=GenerateDraftsResponse)
-async def generate_email_drafts(request: GenerateDraftsRequest):
+async def generate_email_drafts(request: DraftGenerationRequest):
     """
     Generate Month 1 email drafts using Google Gemini AI.
     
@@ -381,9 +410,10 @@ async def generate_email_drafts(request: GenerateDraftsRequest):
         
         supabase = get_supabase_client()
         
-        user_agent_name = "Your Name"
-        user_company_name = "Your Company"
-        target_city = ["your city"]
+        # Use data from frontend request - avoid hardcoded defaults
+        user_agent_name = "{{agent_name}}"
+        user_company_name = "{{company}}"
+        target_city = request.target_city  # Use the target_city from frontend request
         
         try:
             profile_response = supabase.table('profiles').select(
@@ -392,9 +422,9 @@ async def generate_email_drafts(request: GenerateDraftsRequest):
 
             
             if profile_response.data:
-                user_agent_name = profile_response.data.get('full_name', user_agent_name)
-                user_company_name = profile_response.data.get('brokerage', user_company_name)
-                target_city=profile_response.get('markets', target_city),
+                user_agent_name = profile_response.data.get('full_name') or "{{agent_name}}"
+                user_company_name = profile_response.data.get('brokerage') or "{{company}}"
+                # Don't override target_city - use what frontend sent
                 
         except Exception as e:
             logger.warning(f"Could not fetch user profile: {e}")
@@ -404,9 +434,9 @@ async def generate_email_drafts(request: GenerateDraftsRequest):
         emails = campaign_email_service.generate_month_1_emails(
             campaign_id=request.campaign_id,
             campaign_name=request.campaign_name,
-            tones=request.tones,
+            persona=request.persona,
             objective=request.objective,
-            target_city=target_city,
+            target_city=", ".join(target_city) if target_city else "your market",
             agent_name=user_agent_name,
             company_name=user_company_name,
         )
