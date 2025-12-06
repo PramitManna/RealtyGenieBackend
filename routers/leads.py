@@ -30,6 +30,7 @@ class ImportAndSaveResponse(BaseModel):
     message: str
     stats: dict
     inserted_leads: List[Lead]
+    duplicate_info: Optional[dict] = None
 
 @router.post("/clean", response_model=CleanedLeadResponse)
 async def clean_leads(
@@ -111,10 +112,24 @@ async def import_and_save_leads(
         
         logger.info(f"Insert stats - inserted: {db_stats['inserted_count']}, skipped: {db_stats['skipped']}, errors: {db_stats['errors']}")
         
+        # Create success message with duplicate info if any
+        if db_stats['skipped'] > 0:
+            duplicate_list = []
+            if 'duplicate_details' in db_stats and db_stats['duplicate_details']:
+                for email, details in db_stats['duplicate_details'].items():
+                    duplicate_list.append(f"'{email}' (already exists in batch '{details['existing_batch']}')") 
+            
+            duplicate_info = ", ".join(duplicate_list[:3])  # Show first 3
+            if len(duplicate_list) > 3:
+                duplicate_info += f" and {len(duplicate_list) - 3} more"
+            
+            message = f"Import completed: {db_stats['inserted_count']} leads added successfully. {db_stats['skipped']} duplicates skipped: {duplicate_info}"
+        else:
+            message = f"Successfully inserted {db_stats['inserted_count']} leads"
         
         return ImportAndSaveResponse(
             success=True,
-            message=f"Inserted {db_stats['inserted_count']}",
+            message=message,
             stats={
                 "original_count": stats['original_count'],
                 "cleaned_count": stats['cleaned_count'],
@@ -122,8 +137,10 @@ async def import_and_save_leads(
                 "duplicates_removed": stats['duplicates_removed'],
                 "empty_rows": stats['empty_rows'],
                 "inserted": db_stats['inserted_count'],
+                "skipped_duplicates": db_stats['skipped'],
             },
-            inserted_leads=[Lead(**lead) for lead in cleaned_leads]
+            inserted_leads=[Lead(**lead) for lead in inserted_leads if lead],
+            duplicate_info=db_stats.get('duplicate_details')
         )
     
     except HTTPException:
@@ -180,10 +197,24 @@ async def import_from_google_sheets(
             user_token=user_token
         )
         
+        # Create success message with duplicate info if any
+        if db_stats['skipped'] > 0:
+            duplicate_list = []
+            if 'duplicate_details' in db_stats and db_stats['duplicate_details']:
+                for email, details in db_stats['duplicate_details'].items():
+                    duplicate_list.append(f"'{email}' (already exists in batch '{details['existing_batch']}')") 
+            
+            duplicate_info = ", ".join(duplicate_list[:3])  # Show first 3
+            if len(duplicate_list) > 3:
+                duplicate_info += f" and {len(duplicate_list) - 3} more"
+            
+            message = f"Google Sheets import completed: {db_stats['inserted_count']} leads added successfully. {db_stats['skipped']} duplicates skipped: {duplicate_info}"
+        else:
+            message = f"Successfully imported and saved {db_stats['inserted_count']} leads from Google Sheets"
         
         return ImportAndSaveResponse(
             success=True,
-            message=f"Successfully imported and saved {len(inserted_leads)} leads",
+            message=message,
             stats={
                 "original_count": stats['original_count'],
                 "cleaned_count": stats['cleaned_count'],
@@ -191,8 +222,10 @@ async def import_from_google_sheets(
                 "duplicates_removed": stats['duplicates_removed'],
                 "empty_rows": stats['empty_rows'],
                 "inserted": db_stats['inserted_count'],
+                "skipped_duplicates": db_stats['skipped'],
             },
-            inserted_leads=[Lead(**lead) for lead in cleaned_leads]
+            inserted_leads=[Lead(**lead) for lead in inserted_leads if lead],
+            duplicate_info=db_stats.get('duplicate_details')
         )
     
     except HTTPException:
@@ -265,9 +298,24 @@ async def import_from_photo(
         
         logger.info(f"✅ Inserted {db_stats['inserted_count']} leads from photo")
         
+        # Create success message with duplicate info if any
+        if db_stats['skipped'] > 0:
+            duplicate_list = []
+            if 'duplicate_details' in db_stats and db_stats['duplicate_details']:
+                for email, details in db_stats['duplicate_details'].items():
+                    duplicate_list.append(f"'{email}' (already exists in batch '{details['existing_batch']}')") 
+            
+            duplicate_info = ", ".join(duplicate_list[:3])  # Show first 3
+            if len(duplicate_list) > 3:
+                duplicate_info += f" and {len(duplicate_list) - 3} more"
+            
+            message = f"Photo import completed: {db_stats['inserted_count']} leads added successfully. {db_stats['skipped']} duplicates skipped: {duplicate_info}"
+        else:
+            message = f"Successfully extracted and saved {db_stats['inserted_count']} leads from photo"
+        
         return ImportAndSaveResponse(
             success=True,
-            message=f"Successfully extracted and saved {db_stats['inserted_count']} leads from photo",
+            message=message,
             stats={
                 "original_count": stats['original_count'],
                 "cleaned_count": stats['cleaned_count'],
@@ -275,8 +323,10 @@ async def import_from_photo(
                 "duplicates_removed": stats['duplicates_removed'],
                 "empty_rows": stats['empty_rows'],
                 "inserted": db_stats['inserted_count'],
+                "skipped_duplicates": db_stats['skipped'],
             },
-            inserted_leads=[Lead(**lead) for lead in cleaned_leads]
+            inserted_leads=[Lead(**lead) for lead in inserted_leads if lead],
+            duplicate_info=db_stats.get('duplicate_details')
         )
     
     except HTTPException:
@@ -296,6 +346,51 @@ async def validate_email_endpoint(email: str):
         "is_valid": is_valid,
         "cleaned_email": clean_email(email) if is_valid else None
     }
+
+@router.post("/check-duplicates")
+async def check_duplicates(
+    emails: List[str], 
+    user_id: str,
+    batch_id: Optional[str] = None
+):
+    """
+    Check which emails already exist for a user before importing
+    """
+    try:
+        if not emails:
+            raise HTTPException(status_code=400, detail="No emails provided")
+        
+        supabase = get_supabase_service()
+        duplicate_info = supabase.check_duplicate_emails(emails, user_id, batch_id)
+        
+        # Format detailed duplicate info with clear error messages
+        detailed_duplicates = []
+        for email, info in duplicate_info['details'].items():
+            detailed_duplicates.append({
+                'email': email,
+                'existing_batch': info['batch_id'],
+                'existing_name': info.get('name', 'No name'),
+                'existing_id': info.get('id'),
+                'error_message': f"Email '{email}' already exists in batch '{info['batch_id']}'"
+            })
+        
+        return {
+            "success": True,
+            "total_emails": len(emails),
+            "duplicate_count": len(duplicate_info['duplicates']),
+            "unique_count": len(emails) - len(duplicate_info['duplicates']),
+            "duplicates": duplicate_info['duplicates'],
+            "duplicate_details": detailed_duplicates,
+            "new_emails": [email for email in emails if email not in duplicate_info['duplicates']],
+            "summary": f"Found {len(duplicate_info['duplicates'])} duplicates out of {len(emails)} emails checked"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking duplicates: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 
 @router.post("/validate-batch", response_model=CleanedLeadResponse)
 async def validate_leads(leads: List[Lead]):
@@ -444,10 +539,14 @@ async def add_single_lead(
     
     except HTTPException:
         raise
+    except ValueError as ve:
+        # Handle duplicate email validation error
+        logger.warning(f"Duplicate email validation failed: {str(ve)}")
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"❌ Error adding single lead - {type(e).__name__}: {str(e)}")
         if "duplicate key" in str(e).lower():
-            raise HTTPException(status_code=400, detail="Lead with this email already exists in this batch")
+            raise HTTPException(status_code=400, detail=f"Lead with email '{email}' already exists")
         elif "foreign key" in str(e).lower():
             raise HTTPException(status_code=400, detail="Invalid batch_id or user_id provided")
         elif "permission denied" in str(e).lower() or "access denied" in str(e).lower():

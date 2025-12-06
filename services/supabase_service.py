@@ -70,7 +70,7 @@ class SupabaseService:
     
     def insert_leads(self, leads: List[dict], batch_id: str, user_id: str, user_token: Optional[str] = None) -> tuple:
         """
-        Insert cleaned leads into Supabase
+        Insert cleaned leads into Supabase with duplicate validation
         
         Args:
             leads: List of cleaned lead dictionaries
@@ -85,20 +85,65 @@ class SupabaseService:
             # Get appropriate client (authenticated or admin)
             client = self._get_client(user_token)
             
-            # Add batch_id and user_id to each lead
-            leads_to_insert = [
-                {
-                    **lead,
-                    'batch_id': batch_id,
-                    'user_id': user_id,
-                    'status': 'active',
+            # Pre-validate for duplicates across user's entire lead database
+            emails_to_check = [lead['email'] for lead in leads]
+            duplicate_check = self.check_duplicate_emails(emails_to_check, user_id)
+            
+            if duplicate_check['duplicates']:
+                logger.warning(f"Found {len(duplicate_check['duplicates'])} duplicate emails for user {user_id}")
+                # Filter out duplicates and create detailed error info
+                duplicate_emails_set = set(dup.lower() for dup in duplicate_check['duplicates'])
+                leads_to_insert_filtered = [
+                    {
+                        **lead,
+                        'batch_id': batch_id,
+                        'user_id': user_id,
+                        'status': 'active',
+                    }
+                    for lead in leads 
+                    if lead['email'].lower() not in duplicate_emails_set
+                ]
+                
+                skipped_count = len(leads) - len(leads_to_insert_filtered)
+                
+                # Create detailed duplicate error messages
+                duplicate_details_formatted = {}
+                for email, info in duplicate_check['details'].items():
+                    duplicate_details_formatted[email] = {
+                        'email': email,
+                        'existing_batch': info['batch_id'],
+                        'existing_name': info.get('name', 'No name'),
+                        'reason': f"Email '{email}' already exists in batch '{info['batch_id']}'"
+                    }
+                
+                logger.info(f"Filtered out {skipped_count} duplicate leads with detailed reasons")
+            else:
+                # Add batch_id and user_id to each lead
+                leads_to_insert_filtered = [
+                    {
+                        **lead,
+                        'batch_id': batch_id,
+                        'user_id': user_id,
+                        'status': 'active',
+                    }
+                    for lead in leads
+                ]
+                skipped_count = 0
+            
+            # If no leads to insert after filtering
+            if not leads_to_insert_filtered:
+                logger.warning("No leads to insert after duplicate filtering")
+                return [], {
+                    "inserted_count": 0,
+                    "skipped": len(leads),
+                    "errors": 0,
+                    "duplicate_details": duplicate_details_formatted,
+                    "duplicate_count": len(leads)
                 }
-                for lead in leads
-            ]
             
             # Try bulk insert first
             try:
-                response = client.table('leads').insert(leads_to_insert).execute()
+                response = client.table('leads').insert(leads_to_insert_filtered).execute()
                 inserted_leads = response.data if response.data else []
 
                 inserted_count = len(inserted_leads)
@@ -112,17 +157,19 @@ class SupabaseService:
 
                 return inserted_leads, {
                     "inserted_count": inserted_count,
-                    "skipped": 0,
-                    "errors": 0
+                    "skipped": skipped_count,
+                    "errors": 0,
+                    "duplicate_details": duplicate_details_formatted if skipped_count > 0 else {},
+                    "duplicate_count": skipped_count
                 }
             except Exception as bulk_error:
-                # Fallback: insert one by one, skip duplicates
+                # Fallback: insert one by one, skip any remaining duplicates
                 logger.warning(f"Bulk insert failed, trying individual inserts: {bulk_error}")
                 inserted_leads = []
-                skipped = 0
+                additional_skipped = 0
                 errors = 0
                 
-                for lead in leads_to_insert:
+                for lead in leads_to_insert_filtered:
                     try:
                         response = client.table('leads').insert([lead]).execute()
                         if response.data:
@@ -131,14 +178,15 @@ class SupabaseService:
                     except Exception as lead_error:
                         error_str = str(lead_error).lower()
                         if "duplicate key" in error_str or "23505" in error_str:
-                            skipped += 1
+                            additional_skipped += 1
                             logger.info(f"⚠️  Skipped duplicate lead: {lead['email']}")
                         else:
                             errors += 1
                             logger.error(f"❌ Error inserting lead {lead['email']}: {lead_error}")
                 
                 inserted_count = len(inserted_leads)
-                logger.info(f"Individual insert summary - inserted: {inserted_count}, skipped: {skipped}, errors: {errors}")
+                total_skipped = skipped_count + additional_skipped
+                logger.info(f"Individual insert summary - inserted: {inserted_count}, skipped: {total_skipped}, errors: {errors}")
 
                 # Update batch lead_count by incrementing with inserted_count
                 try:
@@ -148,8 +196,10 @@ class SupabaseService:
 
                 return inserted_leads, {
                     "inserted_count": inserted_count,
-                    "skipped": skipped,
-                    "errors": errors
+                    "skipped": total_skipped,
+                    "errors": errors,
+                    "duplicate_details": duplicate_details_formatted if total_skipped > 0 else {},
+                    "duplicate_count": total_skipped
                 }
         
         except Exception as e:
@@ -158,7 +208,7 @@ class SupabaseService:
     
     def insert_single_lead(self, email: str, batch_id: str, user_id: str, name: Optional[str] = None, phone: Optional[str] = None, address: Optional[str] = None) -> dict:
         """
-        Insert a single lead into Supabase
+        Insert a single lead into Supabase with duplicate validation
         
         Args:
             email: Lead email
@@ -169,9 +219,21 @@ class SupabaseService:
             address: Optional lead address
         
         Returns:
-            Inserted lead data
+            Inserted lead data or error info
         """
         try:
+            # Check if email already exists for this user
+            duplicate_check = self.check_single_email_exists(email, user_id)
+            
+            if duplicate_check['exists']:
+                existing_lead = duplicate_check['lead_info']
+                error_msg = f"Email '{email}' already exists for this user in batch '{existing_lead['batch_id']}'"
+                if existing_lead.get('name'):
+                    error_msg += f" (Lead name: {existing_lead['name']})"
+                
+                logger.warning(f"Duplicate email attempted: {email} for user {user_id}")
+                raise ValueError(error_msg)
+            
             lead_data = {
                 "email": email,
                 "name": name,
@@ -317,32 +379,84 @@ class SupabaseService:
             logger.error(f"❌ Error updating batch lead count for {batch_id}: {e}")
             raise
     
-    def check_duplicate_emails(self, emails: List[str], batch_id: Optional[str] = None) -> List[str]:
+    def check_duplicate_emails(self, emails: List[str], user_id: str, batch_id: Optional[str] = None) -> dict:
         """
-        Check which emails already exist in database
+        Check which emails already exist in database for a specific user
         
         Args:
             emails: List of emails to check
+            user_id: User ID to scope the check to user's leads only
             batch_id: Optional batch ID to check within specific batch
         
         Returns:
-            List of duplicate emails
+            Dictionary with duplicate info: {
+                'duplicates': List of duplicate emails,
+                'details': Dict mapping email to existing lead info
+            }
         """
         try:
-            query = self.client.table('leads').select('email')
+            query = self.client.table('leads').select('email, name, batch_id, id').eq('user_id', user_id)
             
             if batch_id:
                 query = query.eq('batch_id', batch_id)
             
             response = query.execute()
             
-            existing_emails = {lead['email'].lower() for lead in response.data}
-            duplicates = [email for email in emails if email.lower() in existing_emails]
+            existing_leads = {lead['email'].lower(): lead for lead in response.data}
+            duplicates = []
+            details = {}
             
-            return duplicates
+            for email in emails:
+                email_lower = email.lower()
+                if email_lower in existing_leads:
+                    duplicates.append(email)
+                    details[email] = existing_leads[email_lower]
+            
+            return {
+                'duplicates': duplicates,
+                'details': details
+            }
         except Exception as e:
             logger.error(f"Error checking duplicates: {e}")
-            return []
+            return {'duplicates': [], 'details': {}}
+    
+    def check_single_email_exists(self, email: str, user_id: str, batch_id: Optional[str] = None) -> dict:
+        """
+        Check if a single email already exists for a user
+        
+        Args:
+            email: Email to check
+            user_id: User ID to scope the check
+            batch_id: Optional batch ID to exclude from check (for updates)
+        
+        Returns:
+            Dictionary with existence info: {
+                'exists': boolean,
+                'lead_info': existing lead data if exists
+            }
+        """
+        try:
+            query = self.client.table('leads').select('*').eq('user_id', user_id).eq('email', email)
+            
+            if batch_id:
+                # Exclude the current batch when checking (useful for updates)
+                query = query.neq('batch_id', batch_id)
+            
+            response = query.execute()
+            
+            if response.data:
+                return {
+                    'exists': True,
+                    'lead_info': response.data[0]
+                }
+            else:
+                return {
+                    'exists': False,
+                    'lead_info': None
+                }
+        except Exception as e:
+            logger.error(f"Error checking email existence: {e}")
+            return {'exists': False, 'lead_info': None}
     
     def _verify_lead_ownership(self, lead_id: str, user_id: str) -> bool:
         """
