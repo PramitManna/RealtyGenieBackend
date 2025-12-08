@@ -11,10 +11,113 @@ import json
 
 from services.supabase_service import get_supabase_client
 from services.mailgun_service import mailgun_service
+from services.gemini_service import get_gemini_service
 from utils.timezone_service import is_within_send_window
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def generate_premium_festive_email(
+    festival_name: str,
+    festival_description: str,
+    recipient_name: str,
+    agent_name: str,
+    company_name: str,
+    city: str,
+    agent_specialty: str = "real estate"
+) -> Dict[str, str]:
+    """
+    Generate a premium, professional festive email using Gemini AI
+    
+    Args:
+        festival_name: Name of the festival (e.g., "Christmas", "Diwali")
+        festival_description: Brief context about the festival
+        recipient_name: Lead's name
+        agent_name: Agent's full name
+        company_name: Brokerage/company name
+        city: Target city/market
+        agent_specialty: Agent's specialty (default: "real estate")
+    
+    Returns:
+        Dict with 'subject' and 'body' keys containing generated content
+    """
+    try:
+        # Initialize Gemini service properly
+        from services.gemini_service import GeminiService
+        gemini_service = GeminiService()
+        
+        if not gemini_service or not gemini_service.model:
+            logger.warning("Gemini service not available, using fallback template")
+            return None
+        
+        # Premium prompt engineering for high-quality festive emails
+        prompt = f"""You are an expert copywriter specializing in luxury real estate communications. 
+Your task is to craft an exceptionally warm, professional, and memorable {festival_name} greeting email.
+
+**CONTEXT:**
+- Festival: {festival_name} ({festival_description})
+- From: {agent_name}, a premium real estate professional at {company_name}
+- To: {recipient_name}, a valued client/lead in {city}
+- Tone: Warm, genuine, elegant, and relationship-focused (NOT salesy)
+- Brand: Sophisticated, trustworthy, community-oriented
+
+**WRITING GUIDELINES:**
+1. **Subject Line:** Create a captivating, emoji-enhanced subject (35-50 chars) that feels personal and festive
+2. **Opening:** Start with genuine warmth that immediately connects emotionally
+3. **Body Structure:**
+   - Personal greeting acknowledging the recipient by name
+   - Heartfelt festival wishes that feel authentic, not generic
+   - Subtle connection to {city} community or local festivities
+   - Brief mention of gratitude for the relationship (1 sentence max)
+   - Forward-looking statement about the coming year
+   - Warm, sincere closing
+4. **Tone Balance:** 85% personal warmth, 10% community connection, 5% subtle professionalism
+5. **Length:** Keep it concise (150-200 words) - quality over quantity
+6. **Avoid:** Hard sells, property mentions, service pitches, corporate jargon, excessive formality
+7. **Include:** Genuine emotion, local flavor, cultural sensitivity, memorable closing
+
+**STYLE NOTES:**
+- Use short, impactful sentences mixed with flowing prose
+- Include 1-2 relevant emojis naturally (not forced)
+- Write as if sending to a friend you respect
+- Make it feel handwritten, not templated
+- Reference the season/festival authentically
+- End with something that makes them smile
+
+**OUTPUT FORMAT (JSON):**
+{{
+  "subject": "your subject line here",
+  "body": "your email body here (use \\n for line breaks, keep HTML-free)"
+}}
+
+Generate a {festival_name} email that {recipient_name} will actually enjoy reading and remember."""
+
+        # Generate using Gemini
+        response = gemini_service.model.generate_content(prompt)
+        
+        if not response or not response.text:
+            logger.warning("Empty response from Gemini")
+            return None
+        
+        # Parse JSON response
+        import json
+        import re
+        
+        # Extract JSON from response (handle markdown code blocks)
+        text = response.text.strip()
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            result = json.loads(json_match.group())
+            logger.info(f"✨ Generated premium {festival_name} email via Gemini AI")
+            return result
+        else:
+            logger.warning("Could not parse JSON from Gemini response")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error generating festive email with Gemini: {e}")
+        return None
 
 
 def replace_email_placeholders(
@@ -269,6 +372,7 @@ FESTIVE_OCCASIONS = {
         "name": "Christmas",
         "month": 12,
         "day": 25,
+        "description": "A joyful holiday celebrating love, family, and the spirit of giving",
         "subject": "🎄 Warm Holiday Wishes from {{agent_name}}",
         "template": """
 Dear {{recipient_name}},
@@ -288,6 +392,7 @@ Warmest holiday wishes,
         "name": "New Year",
         "month": 1,
         "day": 1,
+        "description": "Fresh beginnings and new opportunities as we welcome a brand new year",
         "subject": "🎉 Happy New Year from {{agent_name}}!",
         "template": """
 Happy New Year, {{recipient_name}}!
@@ -307,6 +412,7 @@ Best wishes,
         "name": "Canada Day",
         "month": 7,
         "day": 1,
+        "description": "Celebrating Canadian pride, diversity, and our beautiful communities from coast to coast",
         "subject": "🇨🇦 Happy Canada Day from {{agent_name}}!",
         "template": """
 Happy Canada Day, {{recipient_name}}!
@@ -324,6 +430,7 @@ Proud to serve our community,
         "name": "Thanksgiving",
         "month": 10,
         "day": 14,  # 2nd Monday in October (approximate)
+        "description": "A time to express gratitude for blessings, community, and meaningful relationships",
         "subject": "🦃 Happy Thanksgiving from {{agent_name}}",
         "template": """
 Happy Thanksgiving, {{recipient_name}}!
@@ -341,6 +448,7 @@ With gratitude,
         "name": "Valentine's Day",
         "month": 2,
         "day": 14,
+        "description": "Celebrating love, appreciation, and meaningful connections in our lives",
         "subject": "💝 Sending Love and Appreciation - {{agent_name}}",
         "template": """
 Happy Valentine's Day, {{recipient_name}}!
@@ -358,6 +466,7 @@ Warm wishes,
         "name": "Halloween",
         "month": 10,
         "day": 31,
+        "description": "A fun celebration of creativity, community spirit, and making memories",
         "subject": "🎃 Have a Spooktacular Halloween! - {{agent_name}}",
         "template": """
 Happy Halloween, {{recipient_name}}!
@@ -462,22 +571,42 @@ async def send_festive_emails(test_month: int = None, test_day: int = None) -> D
                             recipient_name = lead.get("name", "Friend")
                             recipient_email = lead["email"]
                             
-                            # Personalize the email
-                            subject = replace_email_placeholders(
-                                fest_data["subject"],
+                            # Generate premium festive email using Gemini AI
+                            logger.info(f"🤖 Generating AI-powered {fest_data['name']} email for {recipient_email}")
+                            
+                            ai_email = generate_premium_festive_email(
+                                festival_name=fest_data["name"],
+                                festival_description=fest_data.get("description", f"Celebrating {fest_data['name']}"),
                                 recipient_name=recipient_name,
-                                city=city,
                                 agent_name=agent_name,
-                                company=company_name
+                                company_name=company_name,
+                                city=city,
+                                agent_specialty="real estate"
                             )
                             
-                            body = replace_email_placeholders(
-                                fest_data["template"],
-                                recipient_name=recipient_name,
-                                city=city,
-                                agent_name=agent_name,
-                                company=company_name
-                            )
+                            # Fallback to template if AI generation fails
+                            if ai_email and "subject" in ai_email and "body" in ai_email:
+                                subject = ai_email["subject"]
+                                body = ai_email["body"]
+                                logger.info(f"✨ Using AI-generated content for {recipient_email}")
+                            else:
+                                # Fallback to template
+                                logger.warning(f"AI generation failed, using template for {recipient_email}")
+                                subject = replace_email_placeholders(
+                                    fest_data["subject"],
+                                    recipient_name=recipient_name,
+                                    city=city,
+                                    agent_name=agent_name,
+                                    company=company_name
+                                )
+                                
+                                body = replace_email_placeholders(
+                                    fest_data["template"],
+                                    recipient_name=recipient_name,
+                                    city=city,
+                                    agent_name=agent_name,
+                                    company=company_name
+                                )
                             
                             # Send via Mailgun
                             if mailgun_service:
