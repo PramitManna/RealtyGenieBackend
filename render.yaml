@@ -25,3 +25,18 @@ services:
       #   sync: false
       # - key: MAILGUN_DOMAIN
       #   sync: false
+
+# Cron job for festive emails (runs daily at 9 AM UTC)
+jobs:
+  - type: cron
+    name: festive-email-sender
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    schedule: "0 9 * * *"  # Daily at 9 AM UTC
+    dockerCommand: python run_festive_cron.py
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Add the same environment variables as your web service
+      # Copy all SUPABASE, MAILGUN, etc. secrets from web service
