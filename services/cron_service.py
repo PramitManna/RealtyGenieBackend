@@ -542,6 +542,30 @@ async def send_festive_emails(test_month: int = None, test_day: int = None) -> D
             enabled_user_ids = [s["user_id"] for s in settings_response.data]
             logger.info(f"Sending {fest_data['name']} emails to {len(enabled_user_ids)} users' leads")
             
+            # Generate ONE premium email for this festival (reuse for all recipients)
+            logger.info(f"🤖 Generating ONE AI-powered {fest_data['name']} email template...")
+            
+            # Use generic placeholders for AI generation
+            ai_email_template = generate_premium_festive_email(
+                festival_name=fest_data["name"],
+                festival_description=fest_data.get("description", f"Celebrating {fest_data['name']}"),
+                recipient_name="{{recipient_name}}",  # Placeholder
+                agent_name="{{agent_name}}",  # Placeholder
+                company_name="{{company}}",  # Placeholder
+                city="{{city}}",  # Placeholder
+                agent_specialty="real estate"
+            )
+            
+            if ai_email_template and "subject" in ai_email_template and "body" in ai_email_template:
+                logger.info(f"✨ Using AI-generated template for all {fest_data['name']} emails")
+                # Store the AI-generated template
+                ai_subject_template = ai_email_template["subject"]
+                ai_body_template = ai_email_template["body"]
+            else:
+                logger.warning(f"AI generation failed, using static template for {fest_data['name']}")
+                ai_subject_template = None
+                ai_body_template = None
+            
             # For each user with this festival enabled
             for user_id in enabled_user_ids:
                 try:
@@ -572,27 +596,26 @@ async def send_festive_emails(test_month: int = None, test_day: int = None) -> D
                             recipient_name = lead.get("name", "Friend")
                             recipient_email = lead["email"]
                             
-                            # Generate premium festive email using Gemini AI
-                            logger.info(f"🤖 Generating AI-powered {fest_data['name']} email for {recipient_email}")
-                            
-                            ai_email = generate_premium_festive_email(
-                                festival_name=fest_data["name"],
-                                festival_description=fest_data.get("description", f"Celebrating {fest_data['name']}"),
-                                recipient_name=recipient_name,
-                                agent_name=agent_name,
-                                company_name=company_name,
-                                city=city,
-                                agent_specialty="real estate"
-                            )
-                            
-                            # Fallback to template if AI generation fails
-                            if ai_email and "subject" in ai_email and "body" in ai_email:
-                                subject = ai_email["subject"]
-                                body = ai_email["body"]
-                                logger.info(f"✨ Using AI-generated content for {recipient_email}")
+                            # Use the pre-generated AI template or fallback to static template
+                            if ai_subject_template and ai_body_template:
+                                # Replace placeholders in the AI-generated template
+                                subject = replace_email_placeholders(
+                                    ai_subject_template,
+                                    recipient_name=recipient_name,
+                                    city=city,
+                                    agent_name=agent_name,
+                                    company=company_name
+                                )
+                                
+                                body = replace_email_placeholders(
+                                    ai_body_template,
+                                    recipient_name=recipient_name,
+                                    city=city,
+                                    agent_name=agent_name,
+                                    company=company_name
+                                )
                             else:
-                                # Fallback to template
-                                logger.warning(f"AI generation failed, using template for {recipient_email}")
+                                # Fallback to static template
                                 subject = replace_email_placeholders(
                                     fest_data["subject"],
                                     recipient_name=recipient_name,
