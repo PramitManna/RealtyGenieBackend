@@ -14,9 +14,25 @@ from services.campaign_queue_service import (
 from services.cron_service import send_pending_emails
 from utils.timezone_service import get_recipient_timezone, calculate_campaign_queue_times
 from services.supabase_service import get_supabase_client
+from services.campaign_email_service import CampaignEmailService
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 logger = logging.getLogger(__name__)
+
+
+class DraftGenerationRequest(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    tones: Optional[List[str]] = ["professional"]  # Default to professional tone if None
+    objective: str
+    agent_name: Optional[str] = "Your Name"
+    company_name: Optional[str] = "Your Company"
+    target_city: Optional[List[str]] = ["your market"]  # Accept array format from frontend
+    persona: Optional[str] = "buyer"
+    user_id: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 class CampaignCreateRequest(BaseModel):
@@ -52,6 +68,51 @@ class QueueStatsResponse(BaseModel):
     failed: int
     by_day: Dict[str, Dict]
     pending_emails: Optional[List[Dict]] = []
+
+
+@router.post("/generate-drafts")
+async def generate_email_drafts(request: DraftGenerationRequest):
+    """
+    Generate Month 1 email drafts for a campaign using Gemini AI
+    """
+    try:
+        logger.info(f"Generating email drafts for campaign: {request.campaign_id}")
+        
+        # Handle null/empty tones with default
+        tones = request.tones if request.tones else ["professional"]
+        
+        # Initialize campaign email service
+        email_service = CampaignEmailService()
+        
+        # Convert target_city array to string for service method
+        target_city = request.target_city[0] if request.target_city and len(request.target_city) > 0 else "your market"
+        
+        # Generate email drafts
+        draft_emails = email_service.generate_month_1_emails(
+            campaign_id=request.campaign_id,
+            campaign_name=request.campaign_name,
+            tones=tones,
+            objective=request.objective,
+            agent_name=request.agent_name,
+            company_name=request.company_name,
+            target_city=target_city,
+            persona=request.persona,
+        )
+        
+        logger.info(f"Successfully generated {len(draft_emails)} email drafts")
+        
+        return {
+            "success": True,
+            "emails": draft_emails,  # Frontend expects "emails" key
+            "count": len(draft_emails),
+            "campaign_id": request.campaign_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate email drafts: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate email drafts: {str(e)}")
 
 
 @router.post("/create", response_model=CampaignResponse)
@@ -367,9 +428,10 @@ class DraftGenerationRequest(BaseModel):
     persona: str
     objective: str
     user_id: str
+    tones: Optional[List[str]] = None
     
     class Config:
-        extra = "forbid"
+        extra = "allow"  # Allow extra fields to prevent validation errors
 
 
 class EmailDraft(BaseModel):
@@ -404,9 +466,20 @@ async def generate_email_drafts(request: DraftGenerationRequest):
         HTTPException: If Gemini service unavailable or generation fails
     """
     try:
+        logger.info(f"Generating drafts for campaign: {request.campaign_id}")
+        logger.debug(f"Request data: {request.model_dump_json()}")
+        
+        # Validate required fields
+        if not request.campaign_id:
+            raise HTTPException(status_code=422, detail="campaign_id is required")
+        if not request.persona:
+            raise HTTPException(status_code=422, detail="persona is required")
+        if not request.objective:
+            raise HTTPException(status_code=422, detail="objective is required")
+        if not request.user_id:
+            raise HTTPException(status_code=422, detail="user_id is required")
+        
         from services.campaign_email_service import CampaignEmailService
-
-        print(request.model_dump_json())
         
         supabase = get_supabase_client()
         

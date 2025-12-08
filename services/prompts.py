@@ -115,10 +115,10 @@ The <body> content MUST follow this structure:
 
 Output must be ONLY valid JSON in the structure below:
 
-{
+{{
   "subject": "",
   "body": ""
-}
+}}
 
 STOPPING:
 Stop after producing the JSON object.  
