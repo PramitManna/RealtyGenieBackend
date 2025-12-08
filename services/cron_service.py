@@ -46,6 +46,7 @@ def generate_premium_festive_email(
         # Initialize Gemini service properly
         from services.gemini_service import GeminiService
         gemini_service = GeminiService()
+        gemini_service._ensure_initialized()  # Make sure it's initialized
         
         if not gemini_service or not gemini_service.model:
             logger.warning("Gemini service not available, using fallback template")
