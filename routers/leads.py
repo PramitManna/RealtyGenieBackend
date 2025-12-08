@@ -365,7 +365,12 @@ async def check_duplicates(
             raise HTTPException(status_code=400, detail="No emails provided")
         
         supabase = get_supabase_service()
-        duplicate_info = crud_leads.check_duplicate_emails(supabase.client, emails, user_id, batch_id)
+        # Check duplicates within the specific batch only
+        if batch_id:
+            duplicate_info = crud_leads.check_duplicate_emails_in_batch(supabase.client, emails, user_id, batch_id)
+        else:
+            # If no batch specified, check across all user's batches (legacy behavior)
+            duplicate_info = crud_leads.check_duplicate_emails(supabase.client, emails, user_id)
         
         # Format detailed duplicate info with clear error messages
         detailed_duplicates = []

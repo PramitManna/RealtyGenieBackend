@@ -6,6 +6,65 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 
+def check_duplicate_emails_in_batch(
+    client: Client,
+    emails: List[str],
+    user_id: str,
+    batch_id: str
+) -> Dict[str, any]:
+    """
+    Check for duplicate emails within a specific batch only
+    
+    Args:
+        client: Supabase client
+        emails: List of emails to check
+        user_id: User ID
+        batch_id: Batch ID to check duplicates within
+    
+    Returns:
+        Dictionary with duplicates and details
+    """
+    try:
+        if not emails:
+            return {'duplicates': [], 'details': {}}
+        
+        # Clean emails for comparison
+        cleaned_emails = [email.lower().strip() for email in emails]
+        
+        # Query only leads within the specific batch
+        response = client.table('leads').select(
+            'id, email, name, batch_id'
+        ).eq('user_id', user_id).eq('batch_id', batch_id).in_(
+            'email', cleaned_emails
+        ).execute()
+        
+        existing_leads = response.data if response.data else []
+        
+        # Build duplicate info
+        duplicates = []
+        details = {}
+        
+        for lead in existing_leads:
+            email_lower = lead['email'].lower()
+            duplicates.append(lead['email'])
+            details[lead['email']] = {
+                'batch_id': lead['batch_id'],
+                'name': lead.get('name', 'No name'),
+                'id': lead['id']
+            }
+        
+        logger.info(f"Checked {len(emails)} emails in batch {batch_id}, found {len(duplicates)} duplicates")
+        
+        return {
+            'duplicates': duplicates,
+            'details': details
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking duplicate emails in batch: {e}")
+        raise
+
+
 def insert_leads(
     client: Client,
     leads: List[dict],
@@ -28,10 +87,10 @@ def insert_leads(
     try:
         duplicate_details_formatted = {}
         
-        # Pre-validate duplicates across user's entire lead database
+        # Pre-validate duplicates within the specific batch only
         if leads:
             emails_to_check = [lead['email'] for lead in leads if lead.get('email')]
-            duplicate_check = check_duplicate_emails(client, emails_to_check, user_id)
+            duplicate_check = check_duplicate_emails_in_batch(client, emails_to_check, user_id, batch_id)
             
             if duplicate_check['duplicates']:
                 duplicate_emails_set = {email.lower() for email in duplicate_check['duplicates']}
@@ -175,16 +234,16 @@ def insert_single_lead(
         Dict with success status and lead data
     """
     try:
-        # Check if email already exists for this user
-        duplicate_check = check_single_email_exists(client, email, user_id)
+        # Check if email already exists in the specific batch only
+        duplicate_check = check_duplicate_emails_in_batch(client, [email], user_id, batch_id)
         
-        if duplicate_check['exists']:
-            existing_lead = duplicate_check['lead_info']
-            error_msg = f"Email '{email}' already exists for this user in batch '{existing_lead['batch_id']}'"
+        if duplicate_check['duplicates']:
+            existing_lead = duplicate_check['details'][email]
+            error_msg = f"Email '{email}' already exists in this batch"
             if existing_lead.get('name'):
                 error_msg += f" (Lead name: {existing_lead['name']})"
             
-            logger.warning(f"Duplicate email attempted: {email} for user {user_id}")
+            logger.warning(f"Duplicate email attempted in batch {batch_id}: {email} for user {user_id}")
             raise ValueError(error_msg)
         
         lead_data = {
