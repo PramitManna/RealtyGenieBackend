@@ -375,12 +375,16 @@ Stay safe and enjoy the festivities!
 }
 
 
-async def send_festive_emails() -> Dict:
+async def send_festive_emails(test_month: int = None, test_day: int = None) -> Dict:
     """
     Check if today matches any festive occasions and send emails to users
     who have enabled that festive occasion.
     
     This should be run daily (ideally at 9 AM local time).
+    
+    Args:
+        test_month: Optional month for testing (1-12)
+        test_day: Optional day for testing (1-31)
     
     Returns:
         Statistics dict with sent/failed counts
@@ -395,8 +399,13 @@ async def send_festive_emails() -> Dict:
     try:
         supabase = get_supabase_client()
         now = datetime.now()
-        current_month = now.month
-        current_day = now.day
+        
+        # Use test date if provided, otherwise use current date
+        current_month = test_month if test_month else now.month
+        current_day = test_day if test_day else now.day
+        
+        if test_month and test_day:
+            logger.info(f"🧪 Testing mode: Using date {current_month}/{current_day} instead of {now.month}/{now.day}")
         
         # Find matching festivals
         matching_festivals = []

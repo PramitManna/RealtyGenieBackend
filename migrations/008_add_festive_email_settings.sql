@@ -18,6 +18,13 @@ CREATE INDEX IF NOT EXISTS idx_festive_settings_enabled ON festive_email_setting
 -- Add RLS policies
 ALTER TABLE festive_email_settings ENABLE ROW LEVEL SECURITY;
 
+-- Policy: Allow service role full access (for backend operations)
+CREATE POLICY "Service role has full access"
+    ON festive_email_settings
+    FOR ALL
+    USING (true)
+    WITH CHECK (true);
+
 -- Policy: Users can read their own settings
 CREATE POLICY "Users can read own festive settings"
     ON festive_email_settings

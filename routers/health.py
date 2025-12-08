@@ -50,11 +50,32 @@ async def trigger_cron_emails():
 
 
 @router.post("/cron/send-festive-emails")
-async def trigger_festive_emails():
-    """Manually trigger festive email sending (for testing)"""
+async def trigger_festive_emails(test_date: str = None):
+    """
+    Manually trigger festive email sending (for testing)
+    
+    Args:
+        test_date: Optional date in format "MM-DD" to simulate (e.g., "12-25" for Christmas)
+    """
     try:
-        logger.info("Manually triggering festive email job")
-        stats = await send_festive_emails()
+        logger.info(f"Manually triggering festive email job{f' with test date {test_date}' if test_date else ''}")
+        
+        if test_date:
+            # Parse test date and temporarily override the date checking in cron_service
+            from datetime import datetime
+            try:
+                month, day = map(int, test_date.split('-'))
+                logger.info(f"Testing with simulated date: Month {month}, Day {day}")
+                # We'll pass this to the function
+                stats = await send_festive_emails(test_month=month, test_day=day)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid test_date format. Use MM-DD (e.g., 12-25)"
+                }
+        else:
+            stats = await send_festive_emails()
+        
         return {
             "success": True,
             "message": "Festive email job executed",
