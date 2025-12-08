@@ -5,14 +5,31 @@ Delegates email generation to email_generation.py for better organization.
 
 import os
 import logging
-from typing import Dict
-from google.cloud import vision
-from vertexai.generative_models import GenerativeModel
-import vertexai
+from typing import Dict, Optional
 import pandas as pd
 from dotenv import load_dotenv
 
-from .email_generation import EmailGenerator
+# Lazy imports for memory optimization
+def get_google_vision():
+    try:
+        from google.cloud import vision
+        return vision
+    except ImportError:
+        logging.warning("Google Cloud Vision not available")
+        return None
+
+def get_vertexai():
+    try:
+        import vertexai
+        from vertexai.generative_models import GenerativeModel
+        return vertexai, GenerativeModel
+    except ImportError:
+        logging.warning("VertexAI not available")
+        return None, None
+
+def get_email_generator():
+    from .email_generation import EmailGenerator
+    return EmailGenerator
 
 load_dotenv()
 
@@ -31,11 +48,14 @@ class GeminiService:
     """
     
     def __init__(self):
-        """Initialize service without connecting to Google APIs yet."""
+        """Initialize service with lazy loading for memory efficiency."""
         self.model = None
         self.vision_client = None
         self.email_generator = None
         self._initialized = False
+        self._vertexai = None
+        self._GenerativeModel = None
+        self._vision = None
         
     def _ensure_initialized(self):
         """Ensure the service is initialized with Google APIs."""
@@ -43,7 +63,17 @@ class GeminiService:
             return
             
         try:
-            logger.info("🔧 Initializing Gemini Service...")
+            logger.info("🔧 Initializing Gemini Service with lazy loading...")
+            
+            # Lazy load dependencies
+            self._vertexai, self._GenerativeModel = get_vertexai()
+            self._vision = get_google_vision()
+            
+            if not self._vertexai or not self._GenerativeModel:
+                logger.warning("⚠️ VertexAI not available - AI features disabled")
+                self._initialized = True
+                return
+                
             logger.info(f"📍 Current working directory: {os.getcwd()}")
             logger.info(f"🔍 Checking environment variables...")
             logger.info(f"   - GOOGLE_CREDENTIALS_JSON: {'✅ Found' if os.getenv('GOOGLE_CREDENTIALS_JSON') else '❌ Not found'}")
@@ -91,16 +121,21 @@ class GeminiService:
             if not project_id:
                 raise ValueError("❌ PROJECT_ID not found")
             
-            vertexai.init(project=project_id, location=location)
+            self._vertexai.init(project=project_id, location=location)
             
             # Initialize Gemini model
-            self.model = GenerativeModel("gemini-2.5-flash")
-            self.image_model = GenerativeModel("gemini-2.5-flash-image")
+            self.model = self._GenerativeModel("gemini-2.5-flash")
+            self.image_model = self._GenerativeModel("gemini-2.5-flash-image")
             
-            # Initialize Vision API client
-            self.vision_client = vision.ImageAnnotatorClient()
+            # Initialize Vision API client (only if available)
+            if self._vision:
+                self.vision_client = self._vision.ImageAnnotatorClient()
+            else:
+                self.vision_client = None
+                logger.warning("⚠️ Google Vision not available - image processing disabled")
             
             # Initialize email generator with model and vision client
+            EmailGenerator = get_email_generator()
             self.email_generator = EmailGenerator(self.model, self.vision_client)
             
             self._initialized = True
