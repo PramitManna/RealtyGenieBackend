@@ -93,6 +93,7 @@ class CampaignEmailService:
         self,
         campaign_id: str,
         campaign_name: str,
+        tones: List[str],
         objective: str,
         agent_name: str = "Your Name",
         company_name: str = "Your Company",
@@ -106,22 +107,6 @@ class CampaignEmailService:
         """
         logger.info(f"Generating Month 1 emails for campaign {campaign_id} with persona: {persona}")
         
-        # Map persona to appropriate tones
-        persona_tone_mapping = {
-            "buyer": ["Consultative", "Advisor"],
-            "seller": ["Expert", "Data driven"],
-            "investor": ["Expert", "Data driven"],
-            "past_client": ["Friendly", "Warm"],
-            "referral": ["Friendly", "Warm"],
-            "cold_prospect": ["Light-hearted", "Humorous"]
-        }
-        
-        # Get tones based on persona
-        tones_to_blend = persona_tone_mapping.get(persona.lower(), ["Professional", "Consultative"])
-        tone_description = ", ".join(tones_to_blend)
-        
-        logger.info(f"Auto-mapped tones for {persona}: {tone_description}")
-        
         generated_emails = []
         
         for category in MONTH_1_CATEGORIES:
@@ -131,7 +116,7 @@ class CampaignEmailService:
                     category_prompt=category['prompt'],
                     campaign_context={
                         'campaign_name': campaign_name,
-                        'tones': tones_to_blend,  # Pass all tones for blending
+                        'tones': tones,  # Pass all tones for blending
                         'objective': objective,
                         'agent_name': agent_name,
                         'company_name': company_name,
@@ -173,7 +158,7 @@ class CampaignEmailService:
         
         logger.info(f"Saving {len(emails)} approved emails for campaign {campaign_id}")
         
-        existing_response = self.supabase.table('campaign_emails').select('id, category_id').eq('campaign_id', campaign_id).execute()
+        existing_response = self.supabase.table('campaign_emails').select('id, category_id').eq('batch_id', campaign_id).execute()
         existing_emails = {e['category_id']: e['id'] for e in (existing_response.data or [])}
         
         if existing_emails:
@@ -194,7 +179,7 @@ class CampaignEmailService:
             scheduled_date = scheduled_date.replace(hour=11, minute=0, second=0, microsecond=0)
             
             record = {
-                'campaign_id': campaign_id,
+                'batch_id': campaign_id,
                 'user_id': user_id,
                 'category_id': email['category_id'],
                 'category_name': email['category_name'],
@@ -215,14 +200,16 @@ class CampaignEmailService:
         try:
             response = self.supabase.table('campaign_emails').insert(email_records).execute()
             
-            self.supabase.table('campaigns').update({
+            # Update batch status to active and save start date (campaign_id is actually batch_id)
+            self.supabase.table('batches').update({
                 'start_date': campaign_start_date.isoformat(),
-                'status': 'active',  # Activate campaign
+                'updated_at': campaign_start_date.isoformat(),
+                'status': 'active',  # Activate batch automation
             }).eq('id', campaign_id).execute()
             
             self._queue_emails_for_sending(campaign_id, response.data or email_records, campaign_start_date)
             
-            logger.info(f"Successfully saved {len(email_records)} emails for campaign {campaign_id}")
+            logger.info(f"Successfully saved {len(email_records)} emails for batch {campaign_id}")
             
             return {
                 'success': True,
@@ -239,23 +226,18 @@ class CampaignEmailService:
     
     def _queue_emails_for_sending(
         self,
-        campaign_id: str,
+        campaign_id: str,  # This is actually a batch_id now
         emails: List[Dict],
         campaign_start_date: datetime,
     ) -> None:
         """
-        Queue approved emails for all leads in campaign's batch.
+        Queue approved emails for all leads in batch.
         Simple: For each email × each lead, create a queue entry.
         """
         try:
-            # Get campaign's batch_id
-            campaign_response = self.supabase.table('campaigns').select('batch_id').eq('id', campaign_id).single().execute()
-            if not campaign_response.data:
-                logger.error(f"Campaign {campaign_id} not found")
-                return
-            
-            batch_id = campaign_response.data['batch_id']
-            logger.info(f"📦 Campaign {campaign_id} → Batch {batch_id}")
+            # campaign_id is actually batch_id (we pass batch_id directly now)
+            batch_id = campaign_id
+            logger.info(f"📦 Queuing emails for Batch {batch_id}")
             
             # Get all leads from batch
             leads_response = self.supabase.table('leads').select('id, email, name').eq('batch_id', batch_id).execute()
@@ -370,7 +352,7 @@ class CampaignEmailService:
             try:
                 user_id = email_data.get('user_id')
                 if user_id:
-                    profile_response = self.supabase.table('profiles').select('full_name, brokerage, markets').eq('id', user_id).single().execute()
+                    profile_response = self.supabase.table('profiles').select('full_name, company_name, markets').eq('id', user_id).single().execute()
                     if profile_response.data:
                         agent_name = profile_response.data.get('full_name', agent_name)
                         company_name = profile_response.data.get('brokerage', company_name)

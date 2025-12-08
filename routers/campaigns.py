@@ -417,13 +417,13 @@ async def generate_email_drafts(request: DraftGenerationRequest):
         
         try:
             profile_response = supabase.table('profiles').select(
-                'full_name, brokerage, markets'
+                'full_name, company_name, markets'
             ).eq('id', request.user_id).single().execute()
 
             
             if profile_response.data:
                 user_agent_name = profile_response.data.get('full_name') or "{{agent_name}}"
-                user_company_name = profile_response.data.get('brokerage') or "{{company}}"
+                user_company_name = profile_response.data.get('company_name') or "{{company}}"
                 # Don't override target_city - use what frontend sent
                 
         except Exception as e:

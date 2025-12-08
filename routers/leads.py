@@ -7,6 +7,7 @@ from utils.validation import is_valid_email, clean_email, clean_phone, clean_nam
 from utils.google_sheets import fetch_google_sheet_as_csv
 from services.supabase_service import get_supabase_service
 from services.gemini_service import get_vision_service
+import crud.leads as crud_leads
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/leads", tags=["leads"])
@@ -97,8 +98,10 @@ async def import_and_save_leads(
             raise HTTPException(status_code=400, detail="No valid leads found in file")
         
         supabase = get_supabase_service()
+        client = supabase._get_client(user_token)
         
-        inserted_leads, db_stats = supabase.insert_leads(
+        inserted_leads, db_stats = crud_leads.insert_leads(
+            client=client,
             leads=[{
                 "email": lead["email"],
                 "name": lead["name"],
@@ -106,8 +109,7 @@ async def import_and_save_leads(
                 "address": lead["address"],
             } for lead in cleaned_leads],
             batch_id=batch_id,
-            user_id=user_id,
-            user_token=user_token  # Pass JWT token for authenticated operations
+            user_id=user_id
         )
         
         logger.info(f"Insert stats - inserted: {db_stats['inserted_count']}, skipped: {db_stats['skipped']}, errors: {db_stats['errors']}")
@@ -184,8 +186,10 @@ async def import_from_google_sheets(
         
         # Get batch to check personas
         supabase = get_supabase_service()
+        client = supabase._get_client(user_token)
         
-        inserted_leads, db_stats = supabase.insert_leads(
+        inserted_leads, db_stats = crud_leads.insert_leads(
+            client=client,
             leads=[{
                 "email": lead["email"],
                 "name": lead["name"],
@@ -193,8 +197,7 @@ async def import_from_google_sheets(
                 "address": lead["address"],
             } for lead in cleaned_leads],
             batch_id=batch_id,
-            user_id=user_id,
-            user_token=user_token
+            user_id=user_id
         )
         
         # Create success message with duplicate info if any
@@ -284,7 +287,9 @@ async def import_from_photo(
         
         # Insert into database
         supabase = get_supabase_service()
-        inserted_leads, db_stats = supabase.insert_leads(
+        client = supabase._get_client(user_token)
+        inserted_leads, db_stats = crud_leads.insert_leads(
+            client=client,
             leads=[{
                 "email": lead["email"],
                 "name": lead["name"],
@@ -292,8 +297,7 @@ async def import_from_photo(
                 "address": lead["address"],
             } for lead in cleaned_leads],
             batch_id=batch_id,
-            user_id=user_id,
-            user_token=user_token
+            user_id=user_id
         )
         
         logger.info(f"✅ Inserted {db_stats['inserted_count']} leads from photo")
@@ -361,7 +365,7 @@ async def check_duplicates(
             raise HTTPException(status_code=400, detail="No emails provided")
         
         supabase = get_supabase_service()
-        duplicate_info = supabase.check_duplicate_emails(emails, user_id, batch_id)
+        duplicate_info = crud_leads.check_duplicate_emails(supabase.client, emails, user_id, batch_id)
         
         # Format detailed duplicate info with clear error messages
         detailed_duplicates = []
@@ -482,7 +486,7 @@ async def update_lead(
             raise HTTPException(status_code=400, detail="No fields to update")
         
         supabase = get_supabase_service()
-        result = supabase.update_lead(lead_id, user_id, updates)
+        result = crud_leads.update_lead(supabase.client, lead_id, user_id, updates)
         
         logger.info(f"Updated lead {lead_id} for user {user_id}")
         
@@ -528,7 +532,7 @@ async def add_single_lead(
         logger.info(f"📝 Cleaned data - email: {email}, name: {name}, phone: {phone}")
         
         supabase = get_supabase_service()
-        result = supabase.insert_single_lead(email, batch_id, user_id, name, phone, address)
+        result = crud_leads.insert_single_lead(supabase.client, email, batch_id, user_id, name, phone, address)
         
         logger.info(f"✅ Successfully added lead {email} to batch {batch_id}")
         return {
@@ -562,7 +566,7 @@ async def delete_lead(lead_id: str, user_id: str):
     """
     try:
         supabase = get_supabase_service()
-        result = supabase.delete_lead(lead_id, user_id)
+        result = crud_leads.delete_lead(supabase.client, lead_id, user_id)
         
         logger.info(f"Deleted lead {lead_id} for user {user_id}")
         

@@ -113,7 +113,7 @@ async def send_pending_emails(dry_run: bool = False) -> Dict:
                 try:
                     user_id = email_data.get('user_id')
                     if user_id:
-                        profile_response = supabase.table('profiles').select('full_name, brokerage, markets').eq('id', user_id).single().execute()
+                        profile_response = supabase.table('profiles').select('full_name, company_name, markets').eq('id', user_id).single().execute()
                         if profile_response.data:
                             agent_name = profile_response.data.get('full_name', agent_name)
                             company_name = profile_response.data.get('brokerage', company_name)
