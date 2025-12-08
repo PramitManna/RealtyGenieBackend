@@ -512,3 +512,73 @@ async def trigger_email(request: TriggerEmailRequest):
             {"error": f"Internal server error: {str(e)}"},
             status_code=500
         )
+
+
+class FestiveSettingRequest(BaseModel):
+    user_id: str
+    festive_id: str
+    enabled: bool
+
+
+@router.get("/festive-settings")
+async def get_festive_settings(user_id: str):
+    """Get user's festive email settings"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Get festive settings from database
+        response = supabase.table('festive_email_settings').select('*').eq('user_id', user_id).execute()
+        
+        # Convert to dict for easy lookup
+        settings = {}
+        if response.data:
+            for setting in response.data:
+                settings[setting['festive_id']] = setting['enabled']
+        
+        return {"settings": settings}
+        
+    except Exception as e:
+        logger.error(f"Error fetching festive settings: {e}")
+        return JSONResponse(
+            {"error": f"Failed to fetch settings: {str(e)}"},
+            status_code=500
+        )
+
+
+@router.post("/festive-settings")
+async def update_festive_setting(request: FestiveSettingRequest):
+    """Update a festive email setting for a user"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Upsert the setting
+        data = {
+            'user_id': request.user_id,
+            'festive_id': request.festive_id,
+            'enabled': request.enabled,
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Check if setting exists
+        existing = supabase.table('festive_email_settings').select('id').eq('user_id', request.user_id).eq('festive_id', request.festive_id).execute()
+        
+        if existing.data:
+            # Update existing
+            supabase.table('festive_email_settings').update(data).eq('user_id', request.user_id).eq('festive_id', request.festive_id).execute()
+        else:
+            # Insert new
+            supabase.table('festive_email_settings').insert(data).execute()
+        
+        logger.info(f"Updated festive setting for user {request.user_id}: {request.festive_id} = {request.enabled}")
+        
+        return {
+            "success": True,
+            "message": f"Festive email {'enabled' if request.enabled else 'disabled'}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating festive setting: {e}")
+        return JSONResponse(
+            {"error": f"Failed to update setting: {str(e)}"},
+            status_code=500
+        )
