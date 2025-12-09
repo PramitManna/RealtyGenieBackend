@@ -19,6 +19,7 @@ class GenerateMonth1EmailsRequest(BaseModel):
     persona: str
     objective: str
     target_city: Optional[str] = "your market"
+    user_id: str
 
 
 class EmailContent(BaseModel):
@@ -64,6 +65,7 @@ async def generate_month_1_emails(request: GenerateMonth1EmailsRequest):
             persona=request.persona,
             objective=request.objective,
             target_city=request.target_city,
+            user_id=request.user_id,
         )
         
         return {
@@ -97,7 +99,7 @@ async def save_approved_emails(request: SaveApprovedEmailsRequest):
             campaign_id=request.campaign_id,
             user_id=request.user_id,
             emails=emails_dict,
-            campaign_start_date=campaign_start_date,
+            # campaign_start_date=campaign_start_date,
         )
         
         return result

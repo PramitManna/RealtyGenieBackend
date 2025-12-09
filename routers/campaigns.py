@@ -20,21 +20,6 @@ router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 logger = logging.getLogger(__name__)
 
 
-class DraftGenerationRequest(BaseModel):
-    campaign_id: str
-    campaign_name: str
-    tones: Optional[List[str]] = ["professional"]  # Default to professional tone if None
-    objective: str
-    agent_name: Optional[str] = "Your Name"
-    company_name: Optional[str] = "Your Company"
-    target_city: Optional[List[str]] = ["your market"]  # Accept array format from frontend
-    persona: Optional[str] = "buyer"
-    user_id: Optional[str] = None
-
-    class Config:
-        extra = "allow"
-
-
 class CampaignCreateRequest(BaseModel):
     batch_id: str
     subject: str
@@ -70,49 +55,49 @@ class QueueStatsResponse(BaseModel):
     pending_emails: Optional[List[Dict]] = []
 
 
-@router.post("/generate-drafts")
-async def generate_email_drafts(request: DraftGenerationRequest):
-    """
-    Generate Month 1 email drafts for a campaign using Gemini AI
-    """
-    try:
-        logger.info(f"Generating email drafts for campaign: {request.campaign_id}")
+# @router.post("/generate-drafts")
+# async def generate_email_drafts(request: DraftGenerationRequest):
+#     """
+#     Generate Month 1 email drafts for a campaign using Gemini AI
+#     """
+#     try:
+#         logger.info(f"Generating email drafts for campaign: {request.campaign_id}")
         
-        # Handle null/empty tones with default
-        tones = request.tones if request.tones else ["professional"]
+#         # Handle null/empty tones with default
+#         tones = request.tones if request.tones else ["professional"]
         
-        # Initialize campaign email service
-        email_service = CampaignEmailService()
+#         # Initialize campaign email service
+#         email_service = CampaignEmailService()
         
-        # Convert target_city array to string for service method
-        target_city = request.target_city[0] if request.target_city and len(request.target_city) > 0 else "your market"
+#         # Convert target_city array to string for service method
+#         target_city = request.target_city[0] if request.target_city and len(request.target_city) > 0 else "your market"
         
-        # Generate email drafts
-        draft_emails = email_service.generate_month_1_emails(
-            campaign_id=request.campaign_id,
-            campaign_name=request.campaign_name,
-            tones=tones,
-            objective=request.objective,
-            agent_name=request.agent_name,
-            company_name=request.company_name,
-            target_city=target_city,
-            persona=request.persona,
-        )
+#         # Generate email drafts
+#         draft_emails = email_service.generate_month_1_emails(
+#             campaign_id=request.campaign_id,
+#             campaign_name=request.campaign_name,
+#             tones=tones,
+#             objective=request.objective,
+#             agent_name=request.agent_name,
+#             company_name=request.company_name,
+#             target_city=target_city,
+#             persona=request.persona,
+#         )
         
-        logger.info(f"Successfully generated {len(draft_emails)} email drafts")
+#         logger.info(f"Successfully generated {len(draft_emails)} email drafts")
         
-        return {
-            "success": True,
-            "emails": draft_emails,  # Frontend expects "emails" key
-            "count": len(draft_emails),
-            "campaign_id": request.campaign_id
-        }
+#         return {
+#             "success": True,
+#             "emails": draft_emails,  # Frontend expects "emails" key
+#             "count": len(draft_emails),
+#             "campaign_id": request.campaign_id
+#         }
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to generate email drafts: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to generate email drafts: {str(e)}")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Failed to generate email drafts: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"Failed to generate email drafts: {str(e)}")
 
 
 @router.post("/create", response_model=CampaignResponse)
@@ -512,6 +497,7 @@ async def generate_email_drafts(request: DraftGenerationRequest):
             target_city=", ".join(target_city) if target_city else "your market",
             agent_name=user_agent_name,
             company_name=user_company_name,
+            tones=request.tones
         )
         
         return GenerateDraftsResponse(

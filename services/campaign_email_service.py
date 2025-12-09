@@ -32,15 +32,27 @@ def replace_email_placeholders(
     
     replacements = {
         '{{recipient_name}}': recipient_name,
+        '{recipient_name}': recipient_name,  # Support database column placeholder
+        '{{name}}': recipient_name,
+        '{name}': recipient_name,  # Support Gemini-generated placeholder
         '{{city}}': city,
+        '{city}': city,
         '{{agent_name}}': agent_name,
+        '{agent_name}': agent_name,
         '{{company}}': company,
+        '{company}': company,
         '{{year}}': year,
+        '{year}': year,
     }
     
     result = text
+    logger.debug(f"🔍 Before replacement: '{{name}}' count: {text.count('{name}')}")
     for placeholder, value in replacements.items():
+        if placeholder in result:
+            logger.debug(f"🔄 Replacing '{placeholder}' with '{value}'")
         result = result.replace(placeholder, value)
+    
+    logger.debug(f"🔍 After replacement: '{{name}}' count: {result.count('{name}')}")
     
     return result
 
@@ -99,6 +111,7 @@ class CampaignEmailService:
         company_name: str = "Your Company",
         target_city: str = "your market",
         persona: str = "buyer",
+        user_id: str = None,
     ) -> List[Dict]:
         """
         Generate 5 Month 1 emails using Gemini AI
@@ -121,7 +134,8 @@ class CampaignEmailService:
                         'agent_name': agent_name,
                         'company_name': company_name,
                         'target_city': target_city,
-                    }
+                    },
+                    user_id=user_id
                 )
                 
                 email = {
@@ -174,9 +188,13 @@ class CampaignEmailService:
         email_records = []
         for email in emails:
             send_offset = email['send_day']
-            scheduled_date = campaign_start_date + timedelta(days=send_offset)
             
-            scheduled_date = scheduled_date.replace(hour=11, minute=0, second=0, microsecond=0)
+            # Day 0 should be sent immediately, not scheduled for 11 AM
+            if send_offset == 0:
+                scheduled_date = datetime.utcnow()  # Send now
+            else:
+                scheduled_date = campaign_start_date + timedelta(days=send_offset)
+                scheduled_date = scheduled_date.replace(hour=11, minute=0, second=0, microsecond=0)
             
             record = {
                 'batch_id': campaign_id,
@@ -207,7 +225,11 @@ class CampaignEmailService:
                 'status': 'active',  # Activate batch automation
             }).eq('id', campaign_id).execute()
             
-            self._queue_emails_for_sending(campaign_id, response.data or email_records, campaign_start_date)
+            # TEMPORARILY COMMENTED - Send Day 0 email immediately without queueing
+            # self._queue_emails_for_sending(campaign_id, response.data or email_records, campaign_start_date)
+            
+            # Send Day 0 email instantly
+            self._send_day_0_email_now(campaign_id, response.data or email_records, campaign_start_date)
             
             logger.info(f"Successfully saved {len(email_records)} emails for batch {campaign_id}")
             
@@ -223,6 +245,163 @@ class CampaignEmailService:
         except Exception as e:
             logger.error(f"Error saving approved emails: {e}")
             raise Exception(f"Failed to save emails: {str(e)}")
+    
+    def _send_day_0_email_now(
+        self,
+        campaign_id: str,  # This is actually batch_id
+        emails: List[Dict],
+        campaign_start_date: datetime,
+    ) -> None:
+        """
+        Send Day 0 email instantly to all leads without queueing.
+        """
+        try:
+            from services.mailgun_service import mailgun_service
+            
+            batch_id = campaign_id
+            logger.info(f"📧 Sending Day 0 email instantly for Batch {batch_id}")
+            
+            # Get all leads from batch
+            leads_response = self.supabase.table('leads').select('id, email, name').eq('batch_id', batch_id).execute()
+            leads = leads_response.data or []
+            
+            if not leads:
+                logger.warning(f"⚠️  No leads in batch {batch_id}")
+                return
+            
+            logger.info(f"📋 Found {len(leads)} leads")
+            
+            # Fetch Day 0 email from database to ensure we have the complete body with signature
+            day_0_response = self.supabase.table('campaign_emails').select('*').eq('batch_id', batch_id).eq('send_day', 0).execute()
+            
+            if not day_0_response.data or len(day_0_response.data) == 0:
+                logger.warning(f"⚠️  No Day 0 email found in database for batch {batch_id}")
+                return
+            
+            day_0_email = day_0_response.data[0]
+            logger.info(f"✅ Fetched Day 0 email from database: {day_0_email.get('category_name')}")
+            
+            # Get agent info from user profile
+            agent_name = "Your Agent"
+            company_name = "Your Company"
+            city = "your city"
+            
+            try:
+                user_id = day_0_email.get('user_id')
+                if user_id:
+                    profile_response = self.supabase.table('profiles').select('full_name, company_name, markets').eq('id', user_id).single().execute()
+                    if profile_response.data:
+                        agent_name = profile_response.data.get('full_name', agent_name)
+                        company_name = profile_response.data.get('company_name', company_name)
+                        markets = profile_response.data.get('markets', [])
+                        if markets and len(markets) > 0:
+                            city = markets[0]
+            except Exception as e:
+                logger.warning(f"Could not fetch profile: {e}")
+            
+            sent_count = 0
+            failed_count = 0
+            
+            # Build signature once for all leads
+            signature = ""
+            try:
+                from services.prompts import build_email_signature
+                
+                profile_response = self.supabase.table('profiles').select(
+                    'phone, email, calendly_link, full_name, years_in_business, '
+                    'brokerage_logo_url, brand_logo_url, realtor_type, '
+                    'company_name, brokerage_name, markets'
+                ).eq('id', user_id).single().execute()
+                
+                if profile_response.data:
+                    phone = profile_response.data.get('phone', '')
+                    email_addr = profile_response.data.get('email', '')
+                    calendly_link = profile_response.data.get('calendly_link', '')
+                    full_name = profile_response.data.get('full_name', '')
+                    years = profile_response.data.get('years_in_business', 0)
+                    realtor_type = profile_response.data.get('realtor_type', '').lower()
+                    company_name_db = profile_response.data.get('company_name', '')
+                    brokerage_name = profile_response.data.get('brokerage_name', '')
+                    markets = profile_response.data.get('markets', [])
+                    
+                    # Logo selection based on realtor type
+                    if realtor_type == 'team':
+                        logo_url = profile_response.data.get('brand_logo_url', '')
+                    else:
+                        logo_url = profile_response.data.get('brokerage_logo_url', '')
+                    
+                    # Display brokerage priority
+                    display_brokerage = brokerage_name if brokerage_name else company_name_db
+                    
+                    if full_name and phone and email_addr:
+                        experience = f"{years}+ years helping clients achieve their real estate goals" if years else None
+                        markets_list = markets if isinstance(markets, list) else []
+                        
+                        signature = build_email_signature(
+                            realtor_name=full_name,
+                            brokerage=display_brokerage,
+                            phone=phone,
+                            email=email_addr,
+                            title="Real Estate Professional",
+                            experience=experience,
+                            markets=markets_list,
+                            calendly_link=calendly_link if calendly_link else None,
+                            logo_url=logo_url if logo_url else None
+                        )
+                        logger.info("✅ Built email signature for sending")
+            except Exception as sig_error:
+                logger.warning(f"Could not build signature: {sig_error}")
+            
+            # Send to each lead
+            for lead in leads:
+                try:
+                    recipient_name = lead.get('name', 'Recipient')
+                    
+                    # Replace placeholders
+                    personalized_subject = replace_email_placeholders(
+                        day_0_email['subject'],
+                        recipient_name=recipient_name,
+                        city=city,
+                        agent_name=agent_name,
+                        company=company_name,
+                    )
+                    
+                    personalized_body = replace_email_placeholders(
+                        day_0_email['body'],
+                        recipient_name=recipient_name,
+                        city=city,
+                        agent_name=agent_name,
+                        company=company_name,
+                    )
+                    
+                    # Append signature to personalized body
+                    personalized_body = personalized_body + signature
+                    
+                    logger.info(f"🔍 Final body length with signature: {len(personalized_body)} chars")
+                    
+                    logger.info(f"📧 Sending Day 0 email to {lead['email']}")
+                    
+                    result = mailgun_service.send_email(
+                        to_email=lead['email'],
+                        to_name=recipient_name,
+                        subject=personalized_subject,
+                        html_body=personalized_body,
+                        tags=['day_0', 'month_1', 'instant'],
+                    )
+                    
+                    logger.info(f"✅ Day 0 email sent to {lead['email']}")
+                    sent_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to send Day 0 to {lead['email']}: {str(e)}")
+                    failed_count += 1
+            
+            logger.info(f"🚀 Day 0 instant send complete: {sent_count} sent, {failed_count} failed")
+            
+        except Exception as e:
+            logger.error(f"Error in instant Day 0 sending: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _queue_emails_for_sending(
         self,
@@ -254,6 +433,12 @@ class CampaignEmailService:
             
             # For each email, create queue entry for each lead
             for email in emails:
+                # Get the email_id (it should be in the email dict after insert)
+                email_id = email.get('id')
+                if not email_id:
+                    logger.warning(f"Email missing ID, skipping queue: {email.get('category_name')}")
+                    continue
+                
                 if email['send_day'] == 0:
                     # Day 0: Send immediately (set to 1 hour ago to ensure it's picked up by cron right away)
                     scheduled_date = datetime.utcnow() - timedelta(hours=1)
@@ -264,7 +449,8 @@ class CampaignEmailService:
                 
                 for lead in leads:
                     queue_entry = {
-                        'campaign_id': campaign_id,
+                        'batch_id': campaign_id,  # This is actually batch_id
+                        # 'recepient_email': email_id,  # Reference to campaign_emails table
                         'lead_id': lead['id'],
                         'recipient_email': lead['email'],
                         'recipient_name': lead.get('name', 'Recipient'),
@@ -284,7 +470,7 @@ class CampaignEmailService:
             # Send Day 0 emails immediately
             if day_0_queue_entries:
                 # Fetch the actual queue entries with IDs from database
-                day_0_queued = self.supabase.table('campaign_send_queue').select('*').eq('campaign_id', campaign_id).eq('send_day', 0).eq('status', 'pending').execute()
+                day_0_queued = self.supabase.table('campaign_send_queue').select('*').eq('batch_id', campaign_id).eq('send_day', 0).eq('status', 'pending').execute()
                 if day_0_queued.data:
                     self._send_day_0_emails_immediately(campaign_id, day_0_queued.data)
             
@@ -335,11 +521,11 @@ class CampaignEmailService:
         try:
             from services.mailgun_service import mailgun_service
             
-            # Get the Day 0 email content
-            email_response = self.supabase.table('campaign_emails').select('subject, body, user_id').eq('campaign_id', campaign_id).eq('send_day', 0).single().execute()
+            # Get the Day 0 email content (campaign_id is actually batch_id)
+            email_response = self.supabase.table('campaign_emails').select('subject, body, user_id').eq('batch_id', campaign_id).eq('send_day', 0).single().execute()
             
             if not email_response.data:
-                logger.warning(f"⚠️  Day 0 email not found for campaign {campaign_id}")
+                logger.warning(f"⚠️  Day 0 email not found for batch {campaign_id}")
                 return
             
             email_data = email_response.data

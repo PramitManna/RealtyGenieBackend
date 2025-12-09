@@ -16,6 +16,9 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
+gemini_service = get_gemini_service()
+
+
 class DashboardOverviewResponse(BaseModel):
     total_leads: int
     active_campaigns: int
@@ -431,7 +434,8 @@ async def trigger_email(request: TriggerEmailRequest):
             markets=markets,
             purpose=request.purpose,
             persona=request.persona,
-            short_description=request.short_description
+            short_description=request.short_description,
+            user_id=request.user_id
         )
         
         if not email_content or 'subject' not in email_content or 'body' not in email_content:

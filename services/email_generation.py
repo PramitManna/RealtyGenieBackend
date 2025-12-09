@@ -13,8 +13,10 @@ from vertexai.generative_models import GenerativeModel
 from .prompts import (
     build_single_email_prompt,
     build_triggered_email_prompt,
-    build_image_extraction_prompt
+    build_image_extraction_prompt,
+    build_email_signature
 )
+from services.supabase_service import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,8 @@ class EmailGenerator:
     def generate_single_email(
         self,
         category_prompt: str,
-        campaign_context: Dict[str, str]
+        campaign_context: Dict[str, str],
+        user_id: str = None
     ) -> Dict:
         """
         Generate a single email for a specific category using Vertex AI Gemini.
@@ -89,6 +92,7 @@ class EmailGenerator:
     
     async def generate_triggered_email(
         self,
+        user_id: str,
         realtor_name: str,
         brokerage: str,
         markets: list,
@@ -114,6 +118,7 @@ class EmailGenerator:
             logger.info(
                 f"🎯 Generating triggered email for {realtor_name} - "
                 f"Purpose: {purpose} - Persona: {persona}"
+                f"Short Desc: {short_description}"
             )
             
             prompt = build_triggered_email_prompt(
@@ -143,6 +148,58 @@ class EmailGenerator:
                     email_content['body'] = f"<p>Dear {{name}},</p><p>{body}</p>"
                 
                 logger.info("✅ Successfully generated triggered email")
+                
+                # Append signature if user_id provided
+                if user_id:
+                    try:
+                        supabase = get_supabase_client()
+                        profile_response = supabase.table('profiles').select(
+                            'phone, email, calendly_link, full_name, years_in_business, '
+                            'brokerage_logo_url, brand_logo_url, realtor_type, '
+                            'company_name, brokerage_name, markets'
+                        ).eq('id', user_id).single().execute()
+                        
+                        if profile_response.data:
+                            phone = profile_response.data.get('phone', '')
+                            email_addr = profile_response.data.get('email', '')
+                            calendly_link = profile_response.data.get('calendly_link', '')
+                            full_name = profile_response.data.get('full_name', '')
+                            years = profile_response.data.get('years_in_business', 0)
+                            realtor_type = profile_response.data.get('realtor_type', '').lower()
+                            company_name = profile_response.data.get('company_name', '')
+                            brokerage_name = profile_response.data.get('brokerage_name', '')
+                            markets = profile_response.data.get('markets', [])
+                            
+                            # Logo selection based on realtor type
+                            if realtor_type == 'team':
+                                logo_url = profile_response.data.get('brand_logo_url', '')
+                            else:
+                                logo_url = profile_response.data.get('brokerage_logo_url', '')
+                            
+                            # Display brokerage priority
+                            display_brokerage = brokerage_name if brokerage_name else company_name
+                            
+                            if full_name and phone and email_addr:
+                                experience = f"{years}+ years helping clients achieve their real estate goals" if years else None
+                                markets_list = markets if isinstance(markets, list) else []
+                                
+                                signature = build_email_signature(
+                                    realtor_name=full_name,
+                                    brokerage=display_brokerage,
+                                    phone=phone,
+                                    email=email_addr,
+                                    title="Real Estate Professional",
+                                    experience=experience,
+                                    markets=markets_list,
+                                    calendly_link=calendly_link if calendly_link else None,
+                                    logo_url=logo_url if logo_url else None
+                                )
+                                
+                                email_content['body'] = email_content['body'] + signature
+                                logger.info("✅ Appended email signature")
+                    except Exception as sig_error:
+                        logger.warning(f"Could not append signature: {sig_error}")
+                
                 return email_content
                 
             except json.JSONDecodeError as e:

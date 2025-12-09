@@ -37,92 +37,74 @@ def build_single_email_prompt(category_prompt: str, context: Dict[str, str]) -> 
     
     return f"""
 ROLE:
-You are an elite real estate email strategist who specializes in crafting high-conversion HTML emails for lead generation, nurturing, and appointment setting. Your writing style is premium, concise, psychologically persuasive, and tailored to the real estate industry.
+You are a top-tier real estate email strategist who writes premium, persuasive, high-converting HTML emails for lead generation, nurturing, and appointment setting.
 
 TASK:
-Generate a professional, premium-quality HTML email of around 150 words following the category instructions and user context provided. The output must persuade, build trust, and encourage action while maintaining a warm, credible tone.
+Write a ~200-word luxury-grade HTML email using the context below. The tone must be warm, credible, emotionally intelligent, and designed to drive a single clear action.
 
 CONTEXT:
 Email Category: {category_prompt}
 Agent Name: {agent_name}
 Company Name: {company_name}
-Target Market / City: {target_city}
-Primary Objective: {objective}
+Target Market: {target_city}
+Objective: {objective}
 Year: {current_year}
+Tone: {tone_instruction}
 
-Tone Requirements:
-{tone_instruction}
+Required Placeholders:
+{{recipient_name}}, {{city}}, {{company}}, {{agent_name}}, {{year}}
 
-Required Placeholders (use exactly as written when appropriate):
-- {{recipient_name}}
-- {{city}}
-- {{company}}
-- {{agent_name}}
-- {{year}}
-
-REASONING (INTERNAL LOGIC TO FOLLOW):
-Follow these internal reasoning steps while generating the email (do NOT reveal reasoning):
-
-1. Understand the category’s intent (e.g., follow-up, cold outreach, nurturing, onboarding, reactivation).
-2. Identify the psychological levers best suited (trust, curiosity, urgency, authority, value reassurance).
-3. Craft a strong hook referencing {{city}} or their situation to increase personalization.
-4. Highlight ONE clear value proposition to avoid overwhelming the lead.
-5. Keep language premium, concise, emotionally intelligent, and benefit-driven.
-6. Integrate premium styling using selective gold (#d4af37).
-7. Maintain readability with short paragraphs.
-8. End with a single strong call-to-action aligned with the goal (book a call, view listings, reply, etc.).
-9. Do NOT include a signature — the system will append it.
+INTERNAL LOGIC (DO NOT REVEAL):
+- Understand the email’s intent.
+- Use trust, authority, curiosity, or urgency strategically.
+- Start with a personalized hook referencing {{city}}.
+- Present ONE core value proposition.
+- Keep language premium, concise, and benefit-focused.
+- Use clean, elegant formatting.
+- End with a single strong CTA aligned with the objective.
+- It should not have any markdown language , strictly html format
 
 OUTPUT:
-
-The <body> content MUST follow this structure:
-
-1. Start with a premium headline:
-<h1 style='margin:0 0 12px 0; font-size:22px; font-weight:700;'>
-  A strong value-driven headline
-</h1>
-
-2. First paragraph (personalized hook):
-<p style='margin:0 0 14px 0; line-height:1.6;'>
-  Include a warm introduction referencing {{city}} or their situation. 
-  Highlight one <strong style='color:#d4af37;'>gold-accented phrase</strong> to draw attention.
-</p>
-
-3. Value proposition block with highlighted phrases:
-<p style='margin:0 0 14px 0; line-height:1.6;'>
-  Present the core benefit or insight. Bold only the most important 
-  <strong style='color:#d4af37;'>result-driven statements</strong>.
-</p>
-
-4. Persuasive bullet list with icons (MUST appear in every email):
-<ul style='padding-left:18px; margin:0 0 14px 0;'>
-  <li style='margin-bottom:6px;'>
-    <strong style='color:#d4af37;'>•</strong> Short, punchy proof or benefit
-  </li>
-  <li style='margin-bottom:6px;'>
-    <strong style='color:#d4af37;'>•</strong> What makes your guidance safer/easier
-  </li>
-  <li style='margin-bottom:6px;'>
-    <strong style='color:#d4af37;'>•</strong> Hyper-local or trust-building insight
-  </li>
-</ul>
-
-5. Final CTA paragraph:
-<p style='margin:0 0 14px 0; line-height:1.6;'>
-  Include one <strong style='color:#d4af37;'>clear call-to-action</strong> encouraging them 
-  to book a call, view a property list, or reply.
-</p>
-
-Output must be ONLY valid JSON in the structure below:
-
+Return ONLY valid JSON:
 {{
   "subject": "",
   "body": ""
 }}
 
-STOPPING:
-Stop after producing the JSON object.  
-Do NOT include explanations, markdown, code blocks, reasoning, or any text outside the JSON.
+HTML BODY MUST FOLLOW THIS STRUCTURE:
+
+<h1 style="margin:0 0 14px; font-size:24px; font-weight:700; letter-spacing:-0.3px;">
+  Premium Value-Driven Headline
+</h1>
+
+<p style="margin:0 0 16px; line-height:1.65; font-size:15px;">
+  Personalized opening referencing {{city}} with a warm tone and 
+  a strategic <strong>highlight that builds relevance</strong>.
+</p>
+
+<p style="margin:0 0 16px; line-height:1.65; font-size:15px;">
+  Deliver one clear value proposition with <strong>specific outcomes</strong> 
+  and a concise explanation of why it matters now.
+</p>
+
+<div style="margin:0 0 18px; padding:12px 14px; border-radius:6px;">
+  <ul style="padding-left:18px; margin:0; font-size:15px; line-height:1.55;">
+    <li style="margin-bottom:8px;">
+      <strong> A short, credible proof or benefit </strong>
+    </li>
+    <li style="margin-bottom:8px;">
+      <strong> What makes your process safer, easier, or smarter </strong>
+    </li>
+    <li style="margin-bottom:0;">
+      <strong> A hyper-local trust insight tied to {{city}} </strong>
+    </li>
+  </ul>
+</div>
+
+<p style="margin:0; line-height:1.65; font-size:15px;">
+  Close with a single <strong>clear call-to-action</strong> aligned with your objective.
+</p>
+
 """
 
 
@@ -214,7 +196,7 @@ Return ONLY valid JSON in this exact structure (literally replace field values, 
 
 {{
   "subject": "Write a compelling, purpose-aligned subject line here (no emojis)",
-  "body": "<h1 style='margin:0 0 12px 0; font-size:22px; font-weight:700;'>Premium headline here</h1><p style='margin:0 0 14px 0; line-height:1.6;'>Use name early for personalization. Highlight one <strong style='color:#d4af37;'>gold-accented benefit</strong> in the intro.</p><p style='margin:0 0 14px 0; line-height:1.6;'>Add value-driven insights relevant to the persona. Include subtle context about {markets_str}, and weave in persuasive lines naturally.</p><ul style='padding-left:18px; margin:0 0 14px 0;'><li style='margin-bottom:6px;'><strong style='color:#d4af37;'>•</strong> Benefit or proof point tailored to the trigger</li><li style='margin-bottom:6px;'><strong style='color:#d4af37;'>•</strong> Trust-building or market insight</li><li style='margin-bottom:6px;'><strong style='color:#d4af37;'>•</strong> Reassuring next-step option</li></ul><p style='margin:0 0 14px 0; line-height:1.6;'>End with a single <strong style='color:#d4af37;'>clear call-to-action</strong> related to the email's purpose (book a call, check listings, reply, etc.).</p>"
+  "body": "<h1 style='margin:0 0 12px 0; font-size:22px; font-weight:700;'>Premium headline here</h1><p style='margin:0 0 14px 0; line-height:1.6;'>Use name early for personalization. Highlight one <strong'>gold-accented benefit</strong> in the intro.</p><p style='margin:0 0 14px 0; line-height:1.6;'>Add value-driven insights relevant to the persona. Include subtle context about {markets_str}, and weave in persuasive lines naturally.</p><ul style='padding-left:18px; margin:0 0 14px 0;'><li style='margin-bottom:6px;'><strong'>•</strong> Benefit or proof point tailored to the trigger</li><li style='margin-bottom:6px;'><strong'>•</strong> Trust-building or market insight</li><li style='margin-bottom:6px;'><strong'>•</strong> Reassuring next-step option</li></ul><p style='margin:0 0 14px 0; line-height:1.6;'>End with a single <strong'>clear call-to-action</strong> related to the email's purpose (book a call, check listings, reply, etc.).</p>"
 }}
 
 Strict rules:
@@ -253,3 +235,80 @@ Document text:
 {extracted_text}
 
 Return ONLY the JSON array, no other text or markdown."""
+
+
+def build_email_signature(
+    realtor_name: str,
+    brokerage: str,
+    phone: str,
+    email: str,
+    website: str = None,
+    title: str = None,
+    experience: str = None,
+    markets: list = None,
+    calendly_link: str = None,
+    logo_url: str = None
+) -> str:
+    """
+    Build a premium HTML email signature block with logo and Calendly CTA button.
+    
+    Args:
+        realtor_name: Name of the realtor
+        brokerage: Brokerage/company name
+        phone: Phone number with country code
+        email: Email address
+        website: Optional website URL
+        title: Optional title/designation
+        experience: Optional experience description
+        markets: Optional list of markets served
+        calendly_link: Optional Calendly link for booking calls
+        logo_url: Optional logo image URL (brokerage or brand logo)
+    
+    Returns:
+        HTML signature block with logo and CTA button
+    """
+    markets_text = f"Serving {', '.join(markets)}" if markets else ""
+    
+    signature_html = f"""
+<div style='border-top: 2px solid #d4af37; margin-top: 24px; padding-top: 20px; font-family: Arial, sans-serif; color: #333;'>
+  <table style='width: 100%; border-collapse: collapse;'>
+    <tr>
+      <!-- Logo on Left -->
+      {f'''<td style='vertical-align: top; padding-right: 20px; width: 140px;'>
+        <img src='{logo_url}' alt='{brokerage}' style='max-width: 120px; max-height: 80px; object-fit: contain; display: block;' />
+      </td>''' if logo_url else ""}
+      
+      <!-- Details on Right -->
+      <td style='vertical-align: top;'>
+        <!-- Realtor Info -->
+        <div style='margin-bottom: 12px;'>
+          <strong style='font-size: 16px; color: #000; display: block; margin-bottom: 4px;'>{realtor_name}</strong>
+          {f"<div style='color: #666; font-size: 12px;'>{title}</div>" if title else ""}
+        </div>
+        
+        <!-- Company Info -->
+        <div style='margin-bottom: 12px; line-height: 1.6;'>
+          <div style='color: #666; font-size: 13px;'>{brokerage}</div>
+          {f"<div style='color: #666; font-size: 12px;'>{experience}</div>" if experience else ""}
+          {f"<div style='color: #666; font-size: 12px;'>{markets_text}</div>" if markets_text else ""}
+        </div>
+        
+        <!-- Contact Information -->
+        <div style='margin-bottom: 16px; line-height: 1.8; font-size: 13px;'>
+          {f"<div style='color: #333; margin-bottom: 4px;'>📞 <strong>{phone}</strong></div>" if phone else ""}
+          {f"<div style='color: #333; margin-bottom: 4px;'>📧 <a href='mailto:{email}' style='color: #d4af37; text-decoration: none;'>{email}</a></div>" if email else ""}
+          {f"<div style='color: #333;'>🌐 <a href='https://{website}' style='color: #d4af37; text-decoration: none;'>{website}</a></div>" if website else ""}
+        </div>
+        
+        <!-- Calendly CTA Button -->
+        {f'''<div style='margin-top: 16px;'>
+          <a href='{calendly_link}' style='display: inline-block; background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);'>
+            📅 Book a 15-minute discovery call
+          </a>
+        </div>''' if calendly_link else ""}
+      </td>
+    </tr>
+  </table>
+</div>
+"""
+    return signature_html.strip()

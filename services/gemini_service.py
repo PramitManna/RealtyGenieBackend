@@ -148,7 +148,8 @@ class GeminiService:
     def generate_single_email(
         self,
         category_prompt: str,
-        campaign_context: Dict[str, str]
+        campaign_context: Dict[str, str],
+        user_id: str = None
     ) -> Dict:
         """
         Generate a single email for a specific category using Vertex AI Gemini.
@@ -156,12 +157,13 @@ class GeminiService:
         Args:
             category_prompt: The prompt for this email category
             campaign_context: Dictionary with campaign_name, tone, objective, target_city
+            user_id: Optional user ID for signature appending
         
         Returns:
             Dictionary with 'subject', 'body' keys and 'metadata' with token usage
         """
         self._ensure_initialized()
-        return self.email_generator.generate_single_email(category_prompt, campaign_context)
+        return self.email_generator.generate_single_email(category_prompt, campaign_context, user_id)
     
     def process_image(self, image_bytes: bytes) -> pd.DataFrame:
         """
@@ -179,6 +181,7 @@ class GeminiService:
 
     async def generate_triggered_email(
         self,
+        user_id,
         realtor_name: str,
         brokerage: str,
         markets: list,
@@ -202,7 +205,7 @@ class GeminiService:
         """
         self._ensure_initialized()
         return await self.email_generator.generate_triggered_email(
-            realtor_name, brokerage, markets, purpose, persona, short_description
+            user_id, realtor_name, brokerage, markets, purpose, persona, short_description
         )
 
 
