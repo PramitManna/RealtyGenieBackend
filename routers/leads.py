@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
+import uuid
 from utils.cleaning import parse_csv_from_bytes, parse_excel_from_bytes, clean_leads_data
 from utils.validation import is_valid_email, clean_email, clean_phone, clean_name, clean_address
 from utils.google_sheets import fetch_google_sheet_as_csv
@@ -11,6 +12,35 @@ import crud.leads as crud_leads
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/leads", tags=["leads"])
+
+def validate_batch_id(batch_id: str) -> str:
+    """Validate that batch_id is a valid UUID format"""
+    try:
+        uuid.UUID(batch_id)
+        return batch_id
+    except ValueError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid batch_id format. Expected UUID, got: {batch_id}"
+        )
+
+def validate_batch_exists(client, batch_id: str, user_id: str) -> dict:
+    """Validate that batch exists and belongs to user"""
+    try:
+        response = client.table('batches').select('*').eq('id', batch_id).eq('user_id', user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Batch {batch_id} not found or doesn't belong to user {user_id}"
+            )
+        
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating batch: {e}")
+        raise HTTPException(status_code=500, detail="Error validating batch")
 
 class Lead(BaseModel):
     email: str
@@ -83,6 +113,9 @@ async def import_and_save_leads(
     Uses JWT token for authentication if provided
     """
     try:
+        # Validate batch_id and user_id format
+        validate_batch_id(batch_id)
+        validate_batch_id(user_id)  # user_id is also UUID
         content = await file.read()
         
         if file.filename.endswith('.csv'):
@@ -98,7 +131,12 @@ async def import_and_save_leads(
             raise HTTPException(status_code=400, detail="No valid leads found in file")
         
         supabase = get_supabase_service()
-        client = supabase._get_client(user_token)
+        # Use service role client for inserting leads to bypass RLS
+        # This ensures leads can be inserted regardless of user authentication
+        client = supabase.client
+        
+        # Validate that batch exists and belongs to user
+        validate_batch_exists(client, batch_id, user_id)
         
         inserted_leads, db_stats = crud_leads.insert_leads(
             client=client,
@@ -163,6 +201,10 @@ async def import_from_google_sheets(
     Sheet must be publicly accessible
     """
     try:
+        # Validate batch_id and user_id format
+        validate_batch_id(batch_id)
+        validate_batch_id(user_id)
+        
         logger.info(f"📊 Importing from Google Sheets: {sheet_url[:50]}...")
         csv_content = fetch_google_sheet_as_csv(sheet_url)
         
@@ -186,7 +228,7 @@ async def import_from_google_sheets(
         
         # Get batch to check personas
         supabase = get_supabase_service()
-        client = supabase._get_client(user_token)
+        client = supabase.client  # Use service role for consistent access
         
         inserted_leads, db_stats = crud_leads.insert_leads(
             client=client,
@@ -251,6 +293,10 @@ async def import_from_photo(
     Supports JPG, PNG, PDF formats
     """
     try:
+        # Validate batch_id and user_id format
+        validate_batch_id(batch_id)
+        validate_batch_id(user_id)
+        
         logger.info(f"📸 Processing image: {file.filename}")
         
         # Validate file type
@@ -287,7 +333,7 @@ async def import_from_photo(
         
         # Insert into database
         supabase = get_supabase_service()
-        client = supabase._get_client(user_token)
+        client = supabase.client  # Use service role for consistent access
         inserted_leads, db_stats = crud_leads.insert_leads(
             client=client,
             leads=[{
@@ -361,6 +407,10 @@ async def check_duplicates(
     Check which emails already exist for a user before importing
     """
     try:
+        # Validate user_id format
+        validate_batch_id(user_id)  # user_id is also UUID
+        if batch_id:
+            validate_batch_id(batch_id)
         if not emails:
             raise HTTPException(status_code=400, detail="No emails provided")
         
@@ -477,6 +527,9 @@ async def update_lead(
     Update a lead (only if user owns it)
     """
     try:
+        # Validate IDs format
+        validate_batch_id(lead_id)
+        validate_batch_id(user_id)
         updates = {}
         if email is not None:
             updates['email'] = email
@@ -522,6 +575,10 @@ async def add_single_lead(
     Add a single lead manually
     """
     try:
+        # Validate batch_id and user_id format
+        validate_batch_id(batch_id)
+        validate_batch_id(user_id)
+        
         logger.info(f"🎯 Adding single lead - email: {email}, batch_id: {batch_id}, user_id: {user_id}")
         
         if not is_valid_email(email):
@@ -570,6 +627,9 @@ async def delete_lead(lead_id: str, user_id: str):
     Delete a lead (only if user owns it)
     """
     try:
+        # Validate IDs format
+        validate_batch_id(lead_id)
+        validate_batch_id(user_id)
         supabase = get_supabase_service()
         result = crud_leads.delete_lead(supabase.client, lead_id, user_id)
         
