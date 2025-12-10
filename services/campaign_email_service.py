@@ -189,9 +189,9 @@ class CampaignEmailService:
         for email in emails:
             send_offset = email['send_day']
             
-            # Day 0 should be sent immediately, not scheduled for 11 AM
+            # Day 0 sends immediately, others are scheduled
             if send_offset == 0:
-                scheduled_date = datetime.utcnow()  # Send now
+                scheduled_date = campaign_start_date  # Send immediately
             else:
                 scheduled_date = campaign_start_date + timedelta(days=send_offset)
                 scheduled_date = scheduled_date.replace(hour=11, minute=0, second=0, microsecond=0)
@@ -225,9 +225,8 @@ class CampaignEmailService:
                 'status': 'active',  # Activate batch automation
             }).eq('id', campaign_id).execute()
             
-            # TEMPORARILY COMMENTED - Send Day 0 email immediately without queueing
-            # self._queue_emails_for_sending(campaign_id, response.data or email_records, campaign_start_date)
-            
+            # Send Day 0 email immediately and queue the rest
+            self._queue_emails_for_sending(campaign_id, response.data or email_records, campaign_start_date)
             # Send Day 0 email instantly
             self._send_day_0_email_now(campaign_id, response.data or email_records, campaign_start_date)
             
@@ -256,7 +255,8 @@ class CampaignEmailService:
         Send Day 0 email instantly to all leads without queueing.
         """
         try:
-            from services.mailgun_service import mailgun_service
+            from services.mailgun_service import MailgunService
+            mailgun_service = MailgunService()
             
             batch_id = campaign_id
             logger.info(f"📧 Sending Day 0 email instantly for Batch {batch_id}")
@@ -410,8 +410,8 @@ class CampaignEmailService:
         campaign_start_date: datetime,
     ) -> None:
         """
-        Queue approved emails for all leads in batch.
-        Simple: For each email × each lead, create a queue entry.
+        Queue approved emails for all leads in batch (excluding Day 0).
+        Day 0 is sent immediately, others are queued for scheduled sending.
         """
         try:
             # campaign_id is actually batch_id (we pass batch_id directly now)
@@ -429,28 +429,26 @@ class CampaignEmailService:
             logger.info(f"📋 Found {len(leads)} leads")
             
             queue_entries = []
-            day_0_queue_entries = []  # Track Day 0 entries for immediate sending
             
-            # For each email, create queue entry for each lead
+            # For each email (except Day 0), create queue entry for each lead
             for email in emails:
+                # Skip Day 0 - it gets sent immediately by _send_day_0_email_now
+                if email['send_day'] == 0:
+                    continue
+                
                 # Get the email_id (it should be in the email dict after insert)
                 email_id = email.get('id')
                 if not email_id:
                     logger.warning(f"Email missing ID, skipping queue: {email.get('category_name')}")
                     continue
                 
-                if email['send_day'] == 0:
-                    # Day 0: Send immediately (set to 1 hour ago to ensure it's picked up by cron right away)
-                    scheduled_date = datetime.utcnow() - timedelta(hours=1)
-                else:
-                    # Day 5+: Schedule for 9 AM on that day
-                    scheduled_date = campaign_start_date + timedelta(days=email['send_day'])
-                    scheduled_date = scheduled_date.replace(hour=9, minute=0, second=0, microsecond=0)
+                # Schedule for 9 AM on the specified day
+                scheduled_date = campaign_start_date + timedelta(days=email['send_day'])
+                scheduled_date = scheduled_date.replace(hour=9, minute=0, second=0, microsecond=0)
                 
                 for lead in leads:
                     queue_entry = {
-                        'batch_id': campaign_id,  # This is actually batch_id
-                        # 'recepient_email': email_id,  # Reference to campaign_emails table
+                        'campaign_id': campaign_id,  # Use campaign_id for queue table
                         'lead_id': lead['id'],
                         'recipient_email': lead['email'],
                         'recipient_name': lead.get('name', 'Recipient'),
@@ -459,20 +457,13 @@ class CampaignEmailService:
                         'status': 'pending',
                     }
                     queue_entries.append(queue_entry)
-                    if email['send_day'] == 0:
-                        day_0_queue_entries.append(queue_entry)
             
-            # Insert all queue entries
+            # Insert all queue entries (excluding Day 0)
             if queue_entries:
                 insert_response = self.supabase.table('campaign_send_queue').insert(queue_entries).execute()
-                logger.info(f"✅ Queued {len(queue_entries)} sends ({len(leads)} leads × {len(emails)} emails)")
-            
-            # Send Day 0 emails immediately
-            if day_0_queue_entries:
-                # Fetch the actual queue entries with IDs from database
-                day_0_queued = self.supabase.table('campaign_send_queue').select('*').eq('batch_id', campaign_id).eq('send_day', 0).eq('status', 'pending').execute()
-                if day_0_queued.data:
-                    self._send_day_0_emails_immediately(campaign_id, day_0_queued.data)
+                logger.info(f"✅ Queued {len(queue_entries)} scheduled sends (excluding Day 0 immediate send)")
+            else:
+                logger.info("✅ No emails to queue (Day 0 sends immediately)")
             
         except Exception as e:
             logger.error(f"Error queuing: {e}")
@@ -519,7 +510,8 @@ class CampaignEmailService:
         This ensures the first introduction email goes out right away when campaign launches.
         """
         try:
-            from services.mailgun_service import mailgun_service
+            from services.mailgun_service import MailgunService
+            mailgun_service = MailgunService()
             
             # Get the Day 0 email content (campaign_id is actually batch_id)
             email_response = self.supabase.table('campaign_emails').select('subject, body, user_id').eq('batch_id', campaign_id).eq('send_day', 0).single().execute()
@@ -611,3 +603,129 @@ class CampaignEmailService:
             logger.error(f"Error in instant Day 0 sending: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+    def _send_all_emails_immediately(
+        self,
+        campaign_id: str,  # This is actually batch_id
+        emails: List[Dict],
+        campaign_start_date: datetime,
+    ) -> None:
+        """
+        Send ALL approved emails immediately instead of scheduling them.
+        This removes the delay and sends the entire sequence at once.
+        """
+        try:
+            from services.mailgun_service import MailgunService
+            mailgun_service = MailgunService()
+            
+            batch_id = campaign_id
+            logger.info(f"📧 Sending ALL emails immediately for Batch {batch_id}")
+            
+            # Get all leads from batch
+            leads_response = self.supabase.table('leads').select('id, email, name').eq('batch_id', batch_id).execute()
+            leads = leads_response.data or []
+            
+            if not leads:
+                logger.warning(f"⚠️  No leads in batch {batch_id}")
+                return
+            
+            logger.info(f"📋 Found {len(leads)} leads")
+            
+            # Get all approved emails for this batch, sorted by send_day
+            all_emails_response = self.supabase.table('campaign_emails').select('*').eq('batch_id', batch_id).order('send_day').execute()
+            
+            if not all_emails_response.data:
+                logger.warning(f"⚠️  No emails found for batch {batch_id}")
+                return
+            
+            all_emails = all_emails_response.data
+            logger.info(f"📧 Found {len(all_emails)} emails to send")
+            
+            # Get agent info from user profile  
+            agent_name = "Your Agent"
+            company_name = "Your Company"
+            city = "your city"
+            user_id = None
+            
+            if all_emails:
+                user_id = all_emails[0].get('user_id')
+                
+                try:
+                    if user_id:
+                        profile_response = self.supabase.table('profiles').select('full_name, company_name, markets').eq('id', user_id).single().execute()
+                        if profile_response.data:
+                            agent_name = profile_response.data.get('full_name', agent_name)
+                            company_name = profile_response.data.get('company_name', company_name)
+                            markets = profile_response.data.get('markets', [])
+                            if markets and len(markets) > 0:
+                                city = markets[0]
+                except Exception as e:
+                    logger.warning(f"Could not fetch profile: {e}")
+            
+            total_sent = 0
+            total_failed = 0
+            
+            # Send all emails for each lead
+            for email_template in all_emails:
+                logger.info(f"📧 Sending {email_template['category_name']} (Day {email_template['send_day']}) to {len(leads)} leads...")
+                
+                email_sent = 0
+                email_failed = 0
+                
+                for lead in leads:
+                    try:
+                        recipient_name = lead.get('name', 'Recipient')
+                        
+                        # Replace placeholders
+                        personalized_subject = replace_email_placeholders(
+                            email_template['subject'],
+                            recipient_name=recipient_name,
+                            city=city,
+                            agent_name=agent_name,
+                            company=company_name,
+                        )
+                        
+                        personalized_body = replace_email_placeholders(
+                            email_template['body'],
+                            recipient_name=recipient_name,
+                            city=city,
+                            agent_name=agent_name,
+                            company=company_name,
+                        )
+                        
+                        # Add email sequence indicator to subject
+                        day_number = email_template['send_day']
+                        if day_number == 0:
+                            subject_with_sequence = personalized_subject
+                        else:
+                            subject_with_sequence = f"[Email {day_number + 1}] {personalized_subject}"
+                        
+                        result = mailgun_service.send_email(
+                            to_email=lead['email'],
+                            to_name=recipient_name,
+                            subject=subject_with_sequence,
+                            html_body=personalized_body,
+                            tags=[f'email_{day_number + 1}', 'month_1', 'immediate', email_template['category_id']],
+                        )
+                        
+                        if result.get('success'):
+                            email_sent += 1
+                            total_sent += 1
+                            logger.info(f"✅ {email_template['category_name']} sent to {lead['email']}")
+                        else:
+                            email_failed += 1
+                            total_failed += 1
+                            logger.error(f"❌ Failed to send {email_template['category_name']} to {lead['email']}")
+                        
+                    except Exception as e:
+                        email_failed += 1
+                        total_failed += 1
+                        logger.error(f"❌ Failed to send {email_template['category_name']} to {lead['email']}: {str(e)}")
+                
+                logger.info(f"📊 {email_template['category_name']}: {email_sent} sent, {email_failed} failed")
+            
+            logger.info(f"🚀 ALL emails immediate send complete: {total_sent} total sent, {total_failed} total failed across {len(all_emails)} email types")
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending all emails immediately: {str(e)}")
+            raise

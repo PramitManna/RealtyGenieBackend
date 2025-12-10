@@ -310,6 +310,7 @@ async def cleanup_old_queue_entries(days_old: int = 90) -> int:
     Returns:
         Number of entries deleted
     """
+    
     supabase = get_supabase_client()
     
     cutoff_date = (datetime.utcnow() - timedelta(days=days_old)).isoformat()

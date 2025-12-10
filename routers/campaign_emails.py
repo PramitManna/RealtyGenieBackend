@@ -62,6 +62,7 @@ async def generate_month_1_emails(request: GenerateMonth1EmailsRequest):
         emails = campaign_email_service.generate_month_1_emails(
             campaign_id=request.campaign_id,
             campaign_name=request.campaign_name,
+            tones=["professional"],  # Default tone for now
             persona=request.persona,
             objective=request.objective,
             target_city=request.target_city,
