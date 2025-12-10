@@ -305,7 +305,7 @@ class CampaignEmailService:
             # Build signature once for all leads
             signature = ""
             try:
-                from services.prompts import build_email_signature
+                from services.prompts import build_email_signature, wrap_email_html
                 
                 profile_response = self.supabase.table('profiles').select(
                     'phone, email, calendly_link, full_name, years_in_business, '
@@ -376,6 +376,9 @@ class CampaignEmailService:
                     
                     # Append signature to personalized body
                     personalized_body = personalized_body + signature
+                    
+                    # Wrap in professional HTML template
+                    personalized_body = wrap_email_html(personalized_body)
                     
                     logger.info(f"🔍 Final body length with signature: {len(personalized_body)} chars")
                     
@@ -661,6 +664,57 @@ class CampaignEmailService:
                                 city = markets[0]
                 except Exception as e:
                     logger.warning(f"Could not fetch profile: {e}")
+
+            # Build signature once for all emails
+            signature = ""
+            try:
+                from services.prompts import build_email_signature
+                
+                if user_id:
+                    profile_response = self.supabase.table('profiles').select(
+                        'phone, email, calendly_link, full_name, years_in_business, '
+                        'brokerage_logo_url, brand_logo_url, realtor_type, '
+                        'company_name, brokerage_name, markets'
+                    ).eq('id', user_id).single().execute()
+                    
+                    if profile_response.data:
+                        phone = profile_response.data.get('phone', '')
+                        email_addr = profile_response.data.get('email', '')
+                        calendly_link = profile_response.data.get('calendly_link', '')
+                        full_name = profile_response.data.get('full_name', '')
+                        years = profile_response.data.get('years_in_business', 0)
+                        realtor_type = profile_response.data.get('realtor_type', '').lower()
+                        company_name_db = profile_response.data.get('company_name', '')
+                        brokerage_name = profile_response.data.get('brokerage_name', '')
+                        markets = profile_response.data.get('markets', [])
+                        
+                        # Logo selection based on realtor type
+                        if realtor_type == 'team':
+                            logo_url = profile_response.data.get('brand_logo_url', '')
+                        else:
+                            logo_url = profile_response.data.get('brokerage_logo_url', '')
+                        
+                        # Display brokerage priority
+                        display_brokerage = brokerage_name if brokerage_name else company_name_db
+                        
+                        if full_name and phone and email_addr:
+                            experience = f"{years}+ years helping clients achieve their real estate goals" if years else None
+                            markets_list = markets if isinstance(markets, list) else []
+                            
+                            signature = build_email_signature(
+                                realtor_name=full_name,
+                                brokerage=display_brokerage,
+                                phone=phone,
+                                email=email_addr,
+                                title="Real Estate Professional",
+                                experience=experience,
+                                markets=markets_list,
+                                calendly_link=calendly_link if calendly_link else None,
+                                logo_url=logo_url if logo_url else None
+                            )
+                            logger.info("✅ Built email signature for bulk sending")
+            except Exception as sig_error:
+                logger.warning(f"Could not build signature: {sig_error}")
             
             total_sent = 0
             total_failed = 0
@@ -692,6 +746,12 @@ class CampaignEmailService:
                             agent_name=agent_name,
                             company=company_name,
                         )
+                        
+                        # Append signature
+                        personalized_body = personalized_body + signature
+                        
+                        from services.prompts import wrap_email_html
+                        personalized_body = wrap_email_html(personalized_body)
                         
                         # Add email sequence indicator to subject
                         day_number = email_template['send_day']

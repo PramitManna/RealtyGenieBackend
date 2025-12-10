@@ -312,3 +312,85 @@ def build_email_signature(
 </div>
 """
     return signature_html.strip()
+
+
+def wrap_email_html(content: str) -> str:
+    """
+    Wrap email content in a professional, responsive HTML container.
+    
+    Args:
+        content: The inner HTML content of the email (body + signature)
+        
+    Returns:
+        Full HTML document string
+    """
+    from datetime import datetime
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            line-height: 1.6;
+            color: #333333;
+        }}
+        .container {{
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }}
+        .content {{
+            padding: 40px;
+        }}
+        .footer {{
+            background-color: #fafafa;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #999999;
+            border-top: 1px solid #eeeeee;
+        }}
+        @media only screen and (max-width: 620px) {{
+            .container {{
+                margin: 0;
+                border-radius: 0;
+                width: 100% !important;
+                box-shadow: none;
+            }}
+            .content {{
+                padding: 20px;
+            }}
+        }}
+        a {{
+            color: #1e88e5;
+            text-decoration: none;
+        }}
+        a:hover {{
+            text-decoration: underline;
+        }}
+        h1, h2, h3 {{
+            color: #111111;
+            margin-top: 0;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="content">
+            {content}
+        </div>
+    </div>
+</body>
+</html>
+""".strip()
